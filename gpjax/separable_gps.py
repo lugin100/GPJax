@@ -14,31 +14,32 @@ from gpjax.gps import AbstractPrior, AbstractPosterior
 from gpjax.linalg.custom_operators import Kronecker
 
 L = tp.TypeVar("L", bound=AbstractLikelihood)
+G = tp.TypeVar("G", bound=Gaussian)
 P = tp.TypeVar("P", bound=AbstractPrior)
 PO = tp.TypeVar("PO", bound=AbstractPosterior)
 
 
 class SeparablePrior():
-	r"""Gaussian process prior over two separable domains."""
+    r"""Gaussian process prior over two separable domains."""
 
-	prior_A: P
-	prior_B: P
+    prior_A: P
+    prior_B: P
 
-	def __init__(
-		self,
-		prior_A: P,
-		prior_B: P
-	):
-		r"""Construct a Gaussian process prior from two priors defined on different domains.
+    def __init__(
+        self,
+        prior_A: P,
+        prior_B: P
+    ):
+        r"""Construct a Gaussian process prior from two priors defined on different domains.
 
-		Args:
-			prior_A: Prior defined on domain A.
-			prior_B: Prior defined on domain B.
-		"""
-		self.prior_A = prior_A
-		self.prior_B = prior_B
+        Args:
+            prior_A: Prior defined on domain A.
+            prior_B: Prior defined on domain B.
+        """
+        self.prior_A = prior_A
+        self.prior_B = prior_B
 
-	def __call__(
+    def __call__(
         self,
         test_inputs_A: Num[Array, "N D"],
         test_inputs_B: Num[Array, "M E"],
@@ -163,3 +164,72 @@ class SeparablePrior():
                 likelihood.
         """
         return self.__mul__(other)
+
+    class SeparableConjugatePosterior():
+
+        prior: AbstractPrior
+        likelihood: tp.Any
+        jitter: float = eqx.field(static=True, default=1e-6)
+
+        def __init__(
+            self,
+            prior: SeparablePrior,
+            likelihood: G,
+            jitter: float = 1e-6,
+        ):
+            r"""Construct a Gaussian process posterior.
+
+            Args:
+                prior (SeparablePrior): The prior distribution.
+                likelihood (Gaussian): The likelihood distribution.
+                jitter (float): A small constant added to the diagonal of the
+                    covariance matrix to ensure numerical stability.
+            """
+            self.prior = prior
+            self.likelihood = likelihood
+            self.jitter = jitter
+
+        def __call__(
+            self,
+            test_inputs_A: Num[Array, "N D"],
+            test_inputs_B: Num[Array, "M E"],
+            train_data: SeparableDataset,
+            *,
+            return_covariance_type: Literal["dense", "diagonal"] = "dense",
+        ) -> GaussianDistribution:
+            return self.predict(
+            test_inputs_A,
+            test_inputs_B,
+            train_data,
+            return_covariance_type=return_covariance_type,
+        )
+
+        def predict(
+            self,
+            test_inputs_A: Num[Array, "N D"],
+            test_inputs_B: Num[Array, "M E"],
+            train_data: SeparableDataset,
+            *,
+            return_covariance_type: Literal["dense", "diagonal"] = "dense",
+        ) -> GaussianDistribution:
+        	mean_function_A = self.prior.prior_A.mean_function
+            mean_function_B = self.prior.prior_B.mean_function
+            kernel_A = self.prior.prior_A.kernel
+            kernel_B = self.prior.prior_B.kernel
+            A, B, y = train_data.A, train_data.B, train_data.y
+            noise = self.likelihood.noise_vector(train_data.n)
+
+            prior_mean = jnp.kron(mean_function_A(test_inputs_A), mean_function_B(test_inputs_A))
+            residual = y - jnp.kron(mean_function_A(A), mean_function_B(A))
+            Kata = kernel_A.cross_covariance(test_inputs_A, A)
+            Kbtb = kernel_B.cross_covariance(test_inputs_B, B)
+            Kaa = kernel_A.gram(A)
+            Kbb = kernel_B.gram(B)
+            Lambda_A, U_A = jnp.linalg.eigh(Kaa)
+            Lambda_B, U_B = jnp.linalg.eigh(Kbb)
+            res = Kronecker(U_A.mT, U_B.mT)(residual)
+            res = res / (jnp.kron(Lambda_A, Lambda_B) + noise)
+            res = Kronecker(U_A, U_B)(res)
+            res = Kronecker(Kata, Kbtb)(res)
+            mean = prior_mean + res
+            return GaussianDistribution(loc=jnp.atleast_1d(mean.squeeze()), scale=cov)
