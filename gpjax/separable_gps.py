@@ -5,26 +5,29 @@ from jaxtyping import (
     Float,
     Num,
 )
+from gpjax.typing import Array
+
 import lineax as lx
 from gpjax.distributions import GaussianDistribution
-from gpjax.likelihoods import Gaussian
+from gpjax.likelihoods import AbstractLikelihood, Gaussian
 from gpjax.gps import AbstractPrior, AbstractPosterior
 from gpjax.linalg.custom_operators import Kronecker
 
-PRI = tp.TypeVar("PRI", bound=AbstractPrior)
-POST = tp.TypeVar("POST", bound=AbstractPosterior)
+L = tp.TypeVar("L", bound=AbstractLikelihood)
+P = tp.TypeVar("P", bound=AbstractPrior)
+PO = tp.TypeVar("PO", bound=AbstractPosterior)
 
 
 class SeparablePrior():
 	r"""Gaussian process prior over two separable domains."""
 
-	prior_A: PRI
-	prior_B: PRI
+	prior_A: P
+	prior_B: P
 
 	def __init__(
 		self,
-		prior_A: PRI,
-		prior_B: PRI
+		prior_A: P,
+		prior_B: P
 	):
 		r"""Construct a Gaussian process prior from two priors defined on different domains.
 
@@ -118,3 +121,45 @@ class SeparablePrior():
         return GaussianDistribution(
             loc=jnp.atleast_1d(mean_at_test.squeeze()), scale=cov
         )
+
+    def __mul__(self, other: L):
+        r"""Combine the prior with a likelihood to form a posterior distribution.
+
+        The product of a prior and likelihood is proportional to the posterior
+        distribution. By computing the product of a GP prior and a likelihood
+        object, a posterior GP object will be returned. Mathematically, this can
+        be described by:
+        ```math
+        p(f(\cdot) \mid y) \propto p(y \mid f(\cdot))p(f(\cdot)),
+        ```
+        where $p(y | f(\cdot))$ is the likelihood and $p(f(\cdot))$ is the prior.
+
+        Args:
+            other (Likelihood): The likelihood distribution of the observed dataset.
+
+        Returns
+            Posterior: The relevant GP posterior for the given prior and
+                likelihood.
+        """
+        is_gaussian_likelihood = isinstance(other, Gaussian)
+        if is_gaussian_likelihood:
+        	return SeparableConjugatePosterior(prior=self, likelihood=other)
+       	raise NotImplementedError(
+       		"SeparablePrior only supports Gaussian likelihoods."
+       		)
+
+    def __rmul__(self, other):
+        r"""Combine the prior with a likelihood to form a posterior distribution.
+
+        Reimplement the multiplication operator to allow for order-invariant
+        product of a likelihood and a prior i.e., likelihood * prior.
+
+        Args:
+            other (Likelihood): The likelihood distribution of the observed
+                dataset.
+
+        Returns
+            Posterior: The relevant GP posterior for the given prior and
+                likelihood.
+        """
+        return self.__mul__(other)
