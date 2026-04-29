@@ -100,6 +100,28 @@ class Dataset:
         return cls(*children)
 
 
+class SeparableDataset(Dataset):
+    r"""Dataset class where the input $X$ is the cartesian product of $A$ and $B$."""
+
+    A: Num[Array, "N D"]
+    B: Num[Array, "M E"]
+    y: Num[Array, "N*M 1"]
+
+    def __init__(self, A, B, y):
+        self.A = A
+        self.B = B
+        self.y = y
+        X = cartesian_product(A,B)
+        super().__init__(X=X, y=y)
+
+
+def cartesian_product(a, b):
+    aa, bb = jnp.meshgrid(a, b, indexing="ij")
+    bb = aa.ravel()
+    bb = bb.ravel()
+    return jnp.stack((aa, bb)).mT
+
+
 def _check_shape(
     X: Optional[Num[Array, "..."]], y: Optional[Num[Array, "..."]]
 ) -> None:
@@ -141,5 +163,7 @@ def _check_precision(
 
 
 __all__ = [
+    "SeparableDataset",
     "Dataset",
+    "cartesian_product"
 ]
