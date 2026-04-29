@@ -47,12 +47,15 @@ __version__ = "0.14.0"
 
 __all__ = [
     "Dataset",
+    "SeparableDataset",
+    "cartesian_product",
     "GaussianDistribution",
     "cite",
     "fit",
     "fit_lbfgs",
     "fit_scipy",
     "gps",
+    "separable_gps"
     "integrators",
     "kernels",
     "likelihoods",
