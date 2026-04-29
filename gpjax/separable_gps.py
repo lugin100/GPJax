@@ -217,19 +217,36 @@ class SeparablePrior():
             kernel_A = self.prior.prior_A.kernel
             kernel_B = self.prior.prior_B.kernel
             A, B, y = train_data.A, train_data.B, train_data.y
-            noise = self.likelihood.noise_vector(train_data.n)
+            #noise = self.likelihood.noise_vector(train_data.n)
+
+            Kaa = kernel_A.gram(A)
+            Kbb = kernel_B.gram(B)
+            Kata = kernel_A.cross_covariance(test_inputs_A, A)
+            Kbtb = kernel_B.cross_covariance(test_inputs_B, B)
+            Kaat = Kata.mT
+            Kbbt = Kbtb.mT
+            Katat = kernel_A.gram(test_inputs_A)
+            Kbtbt = kernel_B.gram(test_inputs_B)
+
+            Lambda_A, U_A = jnp.linalg.eigh(Kaa)
+            Lambda_B, U_B = jnp.linalg.eigh(Kbb)
 
             prior_mean = jnp.kron(mean_function_A(test_inputs_A), mean_function_B(test_inputs_A))
             residual = y - jnp.kron(mean_function_A(A), mean_function_B(A))
-            Kata = kernel_A.cross_covariance(test_inputs_A, A)
-            Kbtb = kernel_B.cross_covariance(test_inputs_B, B)
-            Kaa = kernel_A.gram(A)
-            Kbb = kernel_B.gram(B)
-            Lambda_A, U_A = jnp.linalg.eigh(Kaa)
-            Lambda_B, U_B = jnp.linalg.eigh(Kbb)
             res = Kronecker(U_A.mT, U_B.mT)(residual)
-            res = res / (jnp.kron(Lambda_A, Lambda_B) + noise)
+            res = res / (jnp.kron(Lambda_A, Lambda_B))# + noise)
             res = Kronecker(U_A, U_B)(res)
             res = Kronecker(Kata, Kbtb)(res)
             mean = prior_mean + res
+
+            prior_cov = jnp.kron(Katat, Kbtbt)
+            _, R_A = qr(jnp.diag(jnp.sqrt(Lambda_A)) @ U_A.mT)
+            _, R_B = qr(jnp.diag(jnp.sqrt(Lambda_B)) @ U_B.mT)
+            L = jnp.kron(R_A, R_B).mT
+            X = jnp.kron(Kaat, Kbbt)
+            X = solve_triangular(L, X, lower=False)
+            X = solve_triangular(L, X, lower=False, trans="T")
+            X = jnp.kron(Kata, Kbtb) @ X
+            cov = prior_cov - X
+
             return GaussianDistribution(loc=jnp.atleast_1d(mean.squeeze()), scale=cov)
