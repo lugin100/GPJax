@@ -111,15 +111,31 @@ class SeparableDataset(Dataset):
         self.A = A
         self.B = B
         self.y = y
-        X = cartesian_product(A,B)
+        X = cartesian_concatenation(A,B)
         super().__init__(X=X, y=y)
 
 
-def cartesian_product(a, b):
-    aa, bb = jnp.meshgrid(a, b, indexing="ij")
-    bb = aa.ravel()
-    bb = bb.ravel()
-    return jnp.stack((aa, bb)).mT
+def cartesian_concatenation(A, B):
+    r"""Build cartesian product of rows of inputs, and concatenate their columns.
+
+    Args:
+        A: Matrix of shape (N, D)
+        B: Matrix of shape (M, E)
+    
+    Returns:
+        Matrix of shape (N*M, D+E) where each row is a concatenation
+        of one row from A and one row from B, for all N*M combinations.
+
+    Note: If A or B are one-dimensional, assumes D=1 or E=1 respectively.
+    """
+    # Add singleton dimension if necessary
+    A = A[:,None] if A.ndim == 1 else A
+    B = B[:,None] if B.ndim == 1 else B
+    # Expand rows
+    A_expanded = jnp.repeat(A, B.shape[0], axis=0) # (N*M,D)
+    B_expanded = jnp.tile(B, (A.shape[0], 1)) # (N*M,E)
+    # Concatenate columns
+    return jnp.concatenate([A_expanded, B_expanded], axis=-1) # (N*M,D+E)
 
 
 def _check_shape(
@@ -165,5 +181,5 @@ def _check_precision(
 __all__ = [
     "SeparableDataset",
     "Dataset",
-    "cartesian_product"
+    "cartesian_concatenation"
 ]

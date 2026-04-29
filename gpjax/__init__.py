@@ -31,7 +31,7 @@ from gpjax import (
     variational_families,
 )
 from gpjax.citation import cite
-from gpjax.dataset import Dataset
+from gpjax.dataset import Dataset, SeparableDataset, cartesian_concatenation
 from gpjax.distributions import GaussianDistribution
 from gpjax.fit import (
     fit,
@@ -48,7 +48,7 @@ __version__ = "0.14.0"
 __all__ = [
     "Dataset",
     "SeparableDataset",
-    "cartesian_product",
+    "cartesian_concatenation",
     "GaussianDistribution",
     "cite",
     "fit",
