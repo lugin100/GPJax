@@ -1,12 +1,16 @@
 import beartype.typing as tp
+from typing import Literal
+import equinox as eqx
 import jax
 import jax.numpy as jnp
+from jax.numpy.linalg import qr
+from jax.scipy.linalg import solve_triangular
 from jaxtyping import (
     Float,
     Num,
 )
 from gpjax.typing import Array
-
+from gpjax.dataset import SeparableDataset
 import lineax as lx
 from gpjax.distributions import GaussianDistribution
 from gpjax.likelihoods import AbstractLikelihood, Gaussian
@@ -19,7 +23,7 @@ P = tp.TypeVar("P", bound=AbstractPrior)
 PO = tp.TypeVar("PO", bound=AbstractPosterior)
 
 
-class SeparablePrior():
+class SeparablePrior(eqx.Module):
     r"""Gaussian process prior over two separable domains."""
 
     prior_A: P
@@ -69,6 +73,17 @@ class SeparablePrior():
             return_covariance_type=return_covariance_type,
         )
 
+    def full_mean(self, A, B):
+        mean_A = self.prior_A.mean_function(A)
+        mean_B = self.prior_B.mean_function(B)
+        return jnp.kron(mean_A, mean_B).squeeze()
+
+    def full_gram(self, A, B):
+        gram_A = self.prior_A.kernel.gram(A)
+        gram_B = self.prior_B.kernel.gram(B)
+        return Kronecker(gram_A, gram_B)
+
+
     def predict(
         self,
         test_inputs_A: Num[Array, "N D"],
@@ -107,10 +122,8 @@ class SeparablePrior():
         	Kxx = jnp.kron(Kaa, Kbb)
         	return lx.DiagonalLinearOperator(Kxx) + jitterOperator
 
-       	mean_A = self.prior_A.mean_function(test_inputs_A)
-       	mean_B = self.prior_B.mean_function(test_inputs_B)
+        mean_at_test = self.full_mean(test_inputs_A, test_inputs_B)
 
-        mean_at_test = jnp.kron(mean_A, mean_B)
         cov = jax.lax.cond(
             return_covariance_type == "dense",
             _return_full_covariance,
@@ -165,88 +178,93 @@ class SeparablePrior():
         """
         return self.__mul__(other)
 
-    class SeparableConjugatePosterior():
 
-        prior: AbstractPrior
-        likelihood: tp.Any
-        jitter: float = eqx.field(static=True, default=1e-6)
+class SeparableConjugatePosterior(eqx.Module, tp.Generic[P, L]):
 
-        def __init__(
-            self,
-            prior: SeparablePrior,
-            likelihood: G,
-            jitter: float = 1e-6,
-        ):
-            r"""Construct a Gaussian process posterior.
+    prior: SeparablePrior
+    likelihood: tp.Any
+    jitter: float = eqx.field(static=True, default=1e-6)
 
-            Args:
-                prior (SeparablePrior): The prior distribution.
-                likelihood (Gaussian): The likelihood distribution.
-                jitter (float): A small constant added to the diagonal of the
-                    covariance matrix to ensure numerical stability.
-            """
-            self.prior = prior
-            self.likelihood = likelihood
-            self.jitter = jitter
+    def __init__(
+        self,
+        prior: SeparablePrior,
+        likelihood: G,
+        jitter: float = 1e-6,
+    ):
+        r"""Construct a Gaussian process posterior.
 
-        def __call__(
-            self,
-            test_inputs_A: Num[Array, "N D"],
-            test_inputs_B: Num[Array, "M E"],
-            train_data: SeparableDataset,
-            *,
-            return_covariance_type: Literal["dense", "diagonal"] = "dense",
-        ) -> GaussianDistribution:
-            return self.predict(
-            test_inputs_A,
-            test_inputs_B,
-            train_data,
-            return_covariance_type=return_covariance_type,
-        )
+        Args:
+            prior (SeparablePrior): The prior distribution.
+            likelihood (Gaussian): The likelihood distribution.
+            jitter (float): A small constant added to the diagonal of the
+                covariance matrix to ensure numerical stability.
+        """
+        self.prior = prior
+        self.likelihood = likelihood
+        self.jitter = jitter
 
-        def predict(
-            self,
-            test_inputs_A: Num[Array, "N D"],
-            test_inputs_B: Num[Array, "M E"],
-            train_data: SeparableDataset,
-            *,
-            return_covariance_type: Literal["dense", "diagonal"] = "dense",
-        ) -> GaussianDistribution:
-        	mean_function_A = self.prior.prior_A.mean_function
-            mean_function_B = self.prior.prior_B.mean_function
-            kernel_A = self.prior.prior_A.kernel
-            kernel_B = self.prior.prior_B.kernel
-            A, B, y = train_data.A, train_data.B, train_data.y
-            #noise = self.likelihood.noise_vector(train_data.n)
+    def __call__(
+        self,
+        test_inputs_A: Num[Array, "N D"],
+        test_inputs_B: Num[Array, "M E"],
+        train_data: SeparableDataset,
+        *,
+        return_covariance_type: Literal["dense", "diagonal"] = "dense",
+    ) -> GaussianDistribution:
+        return self.predict(
+        test_inputs_A,
+        test_inputs_B,
+        train_data,
+        return_covariance_type=return_covariance_type,
+    )
 
-            Kaa = kernel_A.gram(A)
-            Kbb = kernel_B.gram(B)
-            Kata = kernel_A.cross_covariance(test_inputs_A, A)
-            Kbtb = kernel_B.cross_covariance(test_inputs_B, B)
-            Kaat = Kata.mT
-            Kbbt = Kbtb.mT
-            Katat = kernel_A.gram(test_inputs_A)
-            Kbtbt = kernel_B.gram(test_inputs_B)
+    def predict(
+        self,
+        test_inputs_A: Num[Array, "N D"],
+        test_inputs_B: Num[Array, "M E"],
+        train_data: SeparableDataset,
+        *,
+        return_covariance_type: Literal["dense", "diagonal"] = "dense",
+    ) -> GaussianDistribution:
+        mean_function_A = self.prior.prior_A.mean_function
+        mean_function_B = self.prior.prior_B.mean_function
+        kernel_A = self.prior.prior_A.kernel
+        kernel_B = self.prior.prior_B.kernel
+        A, B, y = train_data.A, train_data.B, train_data.y
+        #noise = self.likelihood.noise_vector(train_data.n)
 
-            Lambda_A, U_A = jnp.linalg.eigh(Kaa)
-            Lambda_B, U_B = jnp.linalg.eigh(Kbb)
+        Kaa = kernel_A.gram(A)
+        Kbb = kernel_B.gram(B)
+        Kata = lx.MatrixLinearOperator(kernel_A.cross_covariance(test_inputs_A, A))
+        Kbtb = lx.MatrixLinearOperator(kernel_B.cross_covariance(test_inputs_B, B))
+        Kaat = Kata.transpose()
+        Kbbt = Kbtb.transpose()
+        Katat = kernel_A.gram(test_inputs_A)
+        Kbtbt = kernel_B.gram(test_inputs_B)
 
-            prior_mean = jnp.kron(mean_function_A(test_inputs_A), mean_function_B(test_inputs_A))
-            residual = y - jnp.kron(mean_function_A(A), mean_function_B(A))
-            res = Kronecker(U_A.mT, U_B.mT)(residual)
-            res = res / (jnp.kron(Lambda_A, Lambda_B))# + noise)
-            res = Kronecker(U_A, U_B)(res)
-            res = Kronecker(Kata, Kbtb)(res)
-            mean = prior_mean + res
+        Lambda_A, U_A = jnp.linalg.eigh(Kaa.as_matrix())
+        Lambda_B, U_B = jnp.linalg.eigh(Kbb.as_matrix())
+        U_A = lx.MatrixLinearOperator(U_A)
+        U_B = lx.MatrixLinearOperator(U_B)
+        prior_mean = jnp.kron(mean_function_A(test_inputs_A), mean_function_B(test_inputs_B)).squeeze()
+        residual = y - jnp.kron(mean_function_A(A), mean_function_B(B))
+        res = Kronecker(U_A, U_B).transpose()(residual)
+        res = res / (jnp.kron(Lambda_A, Lambda_B))# + noise)
+        res = Kronecker(U_A, U_B)(res)
 
-            prior_cov = jnp.kron(Katat, Kbtbt)
-            _, R_A = qr(jnp.diag(jnp.sqrt(Lambda_A)) @ U_A.mT)
-            _, R_B = qr(jnp.diag(jnp.sqrt(Lambda_B)) @ U_B.mT)
-            L = jnp.kron(R_A, R_B).mT
-            X = jnp.kron(Kaat, Kbbt)
-            X = solve_triangular(L, X, lower=False)
-            X = solve_triangular(L, X, lower=False, trans="T")
-            X = jnp.kron(Kata, Kbtb) @ X
-            cov = prior_cov - X
+        res = Kronecker(Kata, Kbtb)(res)
+        mean = prior_mean + res
+        prior_cov = Kronecker(Katat, Kbtbt)
 
-            return GaussianDistribution(loc=jnp.atleast_1d(mean.squeeze()), scale=cov)
+        _, R_A = qr(jnp.diag(jnp.sqrt(Lambda_A)) @ U_A.as_matrix().mT)
+        _, R_B = qr(jnp.diag(jnp.sqrt(Lambda_B)) @ U_B.as_matrix().mT)
+
+        L = jnp.kron(R_A, R_B).mT
+        X = Kronecker(Kaat, Kbbt).as_matrix()
+        X = solve_triangular(L, X, lower=True)
+        X = solve_triangular(L, X, lower=True, trans="T")
+        X = Kronecker(Kata, Kbtb).as_matrix() @ X
+        X = lx.MatrixLinearOperator(X)
+        cov = prior_cov - X
+
+        return GaussianDistribution(loc=jnp.atleast_1d(mean.squeeze()), scale=cov)
