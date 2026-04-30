@@ -10,12 +10,13 @@ import numpyro.distributions as npd
 from paramax import AbstractUnwrappable
 import typing_extensions as tpe
 
-from gpjax.dataset import Dataset
+from gpjax.dataset import Dataset, SeparableDataset
 from gpjax.distributions import GaussianDistribution
 from gpjax.gps import (
     ConjugatePosterior,
     NonConjugatePosterior,
 )
+from gpjax.separable_gps import SeparableConjugatePosterior
 from gpjax.likelihoods import (
     AbstractHeteroscedasticLikelihood,
 )
@@ -127,6 +128,17 @@ def conjugate_mll(posterior: ConjugatePosterior, data: Dataset) -> ScalarFloat:
 
     mll = GaussianDistribution(jnp.atleast_1d(mx_flat.squeeze()), Sigma)
     return mll.log_prob(jnp.atleast_1d(y_flat.squeeze())).squeeze()
+
+
+def separable_conjugate_mll(
+        posterior: SeparableConjugatePosterior,
+        data: SeparableDataset
+    ) -> ScalarFloat:
+    A, B, y = data.A, data.B, data.y
+    mean = posterior.prior.full_mean(A, B)
+    gram = posterior.prior.full_gram(A, B)
+    mll = GaussianDistribution(mean, gram)
+    return mll.log_prob(y.squeeze()).squeeze()
 
 
 def conjugate_loocv(posterior: ConjugatePosterior, data: Dataset) -> ScalarFloat:
