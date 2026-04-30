@@ -248,11 +248,11 @@ class SeparableConjugatePosterior(eqx.Module, tp.Generic[P, L]):
         U_B = lx.MatrixLinearOperator(U_B)
         prior_mean = jnp.kron(mean_function_A(test_inputs_A), mean_function_B(test_inputs_B)).squeeze()
         residual = y - jnp.kron(mean_function_A(A), mean_function_B(B))
-        res = Kronecker(U_A, U_B).transpose()(residual)
+        res = Kronecker(U_A, U_B).transpose().mv(residual)
         res = res / (jnp.kron(Lambda_A, Lambda_B))# + noise)
-        res = Kronecker(U_A, U_B)(res)
+        res = Kronecker(U_A, U_B).mv(res)
 
-        res = Kronecker(Kata, Kbtb)(res)
+        res = Kronecker(Kata, Kbtb).mv(res)
         mean = prior_mean + res
         prior_cov = Kronecker(Katat, Kbtbt)
 
@@ -263,7 +263,8 @@ class SeparableConjugatePosterior(eqx.Module, tp.Generic[P, L]):
         X = Kronecker(Kaat, Kbbt).as_matrix()
         X = solve_triangular(L, X, lower=True)
         X = solve_triangular(L, X, lower=True, trans="T")
-        X = Kronecker(Kata, Kbtb).as_matrix() @ X
+        # Compute Kron(Kata, Kbtb) @ X by vmapping over vec trick
+        X = jax.vmap(Kronecker(Kata, Kbtb).mv, in_axes=1, out_axes=1)(X)
         X = lx.MatrixLinearOperator(X)
         cov = prior_cov - X
 
