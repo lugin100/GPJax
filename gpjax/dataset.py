@@ -116,7 +116,7 @@ class SeparableDataset(Dataset):
 
 
 def cartesian_concatenation(A, B):
-    r"""Build cartesian product of rows of inputs, and concatenate their columns.
+    r"""Build cartesian product of rows of inputs, and concatenate the pairs along columns.
 
     Args:
         A: Matrix of shape (N, D)
