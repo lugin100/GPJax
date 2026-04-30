@@ -20,6 +20,7 @@ filterwarnings("ignore", category=BeartypeDecorHintPep585DeprecationWarning)
 
 from gpjax import (
     gps,
+    separable_gps,
     integrators,
     kernels,
     likelihoods,
@@ -55,7 +56,7 @@ __all__ = [
     "fit_lbfgs",
     "fit_scipy",
     "gps",
-    "separable_gps"
+    "separable_gps",
     "integrators",
     "kernels",
     "likelihoods",
