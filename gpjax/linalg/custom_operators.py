@@ -4,7 +4,6 @@ import jax
 import jax.numpy as jnp
 import lineax as lx
 
-
 class BlockDiag(lx.AbstractLinearOperator):
     """Block diagonal linear operator."""
 
@@ -77,7 +76,6 @@ class Kronecker(lx.AbstractLinearOperator):
         nb = self.B.out_structure().shape[0]
         dtype = self.A.out_structure().dtype
         return jax.ShapeDtypeStruct((na * nb,), dtype)
-
 
 # Register tag queries for custom operators.
 # Lineax uses singledispatch for is_symmetric, is_diagonal, etc.
@@ -152,3 +150,9 @@ def _is_nsd_blockdiag(op):
 @lx.is_negative_semidefinite.register(Kronecker)
 def _is_nsd_kronecker(op):
     return False
+
+
+@lx.diagonal.register(Kronecker)
+def diagonal_kronecker(op):
+    return jnp.kron(lx.diagonal(operator.A), lx.diagonal(operator.B))
+
