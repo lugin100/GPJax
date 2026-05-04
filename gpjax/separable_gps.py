@@ -183,88 +183,32 @@ class SeparableConjugatePosterior(eqx.Module, tp.Generic[P, L]):
 
     prior: SeparablePrior
     likelihood: tp.Any
-    jitter: float = eqx.field(static=True, default=1e-6)
 
     def __init__(
         self,
         prior: SeparablePrior,
         likelihood: G,
-        jitter: float = 1e-6,
     ):
         r"""Construct a Gaussian process posterior.
 
         Args:
             prior (SeparablePrior): The prior distribution.
             likelihood (Gaussian): The likelihood distribution.
-            jitter (float): A small constant added to the diagonal of the
-                covariance matrix to ensure numerical stability.
         """
         self.prior = prior
         self.likelihood = likelihood
-        self.jitter = jitter
 
-    def __call__(
-        self,
-        test_inputs_A: Num[Array, "N D"],
-        test_inputs_B: Num[Array, "M E"],
-        train_data: SeparableDataset,
-        *,
-        return_covariance_type: Literal["dense", "diagonal"] = "dense",
-    ) -> GaussianDistribution:
-        return self.predict(
-        test_inputs_A,
-        test_inputs_B,
-        train_data,
-        return_covariance_type=return_covariance_type,
-    )
-
-    def predict(
-        self,
-        test_inputs_A: Num[Array, "N D"],
-        test_inputs_B: Num[Array, "M E"],
-        train_data: SeparableDataset,
-        *,
-        return_covariance_type: Literal["dense", "diagonal"] = "dense",
-    ) -> GaussianDistribution:
-        mean_function_A = self.prior.prior_A.mean_function
-        mean_function_B = self.prior.prior_B.mean_function
-        kernel_A = self.prior.prior_A.kernel
-        kernel_B = self.prior.prior_B.kernel
+    def condition_on_data(self, train_data: SeparableDataset):
         A, B, y = train_data.A, train_data.B, train_data.y
-        #noise = self.likelihood.noise_vector(train_data.n)
-
-        Kaa = kernel_A.gram(A)
-        Kbb = kernel_B.gram(B)
-        Kata = lx.MatrixLinearOperator(kernel_A.cross_covariance(test_inputs_A, A))
-        Kbtb = lx.MatrixLinearOperator(kernel_B.cross_covariance(test_inputs_B, B))
-        Kaat = Kata.transpose()
-        Kbbt = Kbtb.transpose()
-        Katat = kernel_A.gram(test_inputs_A)
-        Kbtbt = kernel_B.gram(test_inputs_B)
-
+        Kaa = self.prior.prior_A.kernel.gram(A)
+        Kbb = self.prior.prior_B.kernel.gram(B)
         L = compute_Gram_Cholesky(Kaa, Kbb)
-
-
-        prior_mean = jnp.kron(mean_function_A(test_inputs_A), mean_function_B(test_inputs_B)).squeeze()
-        res = y - jnp.kron(mean_function_A(A), mean_function_B(B))
-        res = solve_triangular(L, res, lower=True)
-        res = solve_triangular(L, res, lower=True, trans="T")
-        res = Kronecker(Kata, Kbtb).mv(res)
-
-        mean = prior_mean + res
-        
-        prior_cov = Kronecker(Katat, Kbtbt)
-
-        X = Kronecker(Kaat, Kbbt).as_matrix()
-        X = solve_triangular(L, X, lower=True)
-        X = solve_triangular(L, X, lower=True, trans="T")
-        # Compute Kron(Kata, Kbtb) @ X by vmapping over vec trick
-        X = jax.vmap(Kronecker(Kata, Kbtb).mv, in_axes=1, out_axes=1)(X)
-        X = lx.MatrixLinearOperator(X)
-        jitterOperator = self.jitter * lx.IdentityLinearOperator(X.in_structure())
-        cov = prior_cov - X + jitterOperator
-
-        return GaussianDistribution(loc=jnp.atleast_1d(mean.squeeze()), scale=cov)
+        return SeparablePosteriorConditionedOnData(
+            self,
+            train_data,
+            Kaa,
+            Kbb,
+            L)
 
 
 def compute_Gram_Cholesky(Kaa, Kbb):
@@ -274,3 +218,85 @@ def compute_Gram_Cholesky(Kaa, Kbb):
     _, R_B = qr(jnp.diag(jnp.sqrt(Lambda_B)) @ U_B.mT)
     L = jnp.kron(R_A, R_B).mT
     return L
+
+
+class SeparablePosteriorConditionedOnData():
+
+    prior: SeparablePrior
+    likelihood: tp.Any
+    train_data: SeparableDataset
+    Kaa: lx.AbstractLinearOperator
+    Kbb: lx.AbstractLinearOperator
+    L: Num[Array, '...']
+    jitter = 1e-6
+
+    def __init__(
+        self,
+        posterior: SeparableConjugatePosterior,
+        train_data: SeparableDataset,
+        Kaa: lx.AbstractLinearOperator,
+        Kbb: lx.AbstractLinearOperator,
+        L: Num[Array, '...']):
+        
+        self.prior = posterior.prior
+        self.likelihood = posterior.likelihood
+        self.train_data = train_data
+        self.Kaa = Kaa
+        self.Kbb = Kbb
+        self.L = L
+
+
+    def __call__(
+        self,
+        test_inputs_A: Num[Array, "N D"],
+        test_inputs_B: Num[Array, "M E"],
+        *,
+        return_covariance_type: Literal["dense", "diagonal"] = "dense",
+    ) -> GaussianDistribution:
+        return self.predict(
+        test_inputs_A,
+        test_inputs_B,
+        return_covariance_type=return_covariance_type,
+    )
+
+    def predict(
+        self,
+        test_inputs_A: Num[Array, "N D"],
+        test_inputs_B: Num[Array, "M E"],
+        *,
+        return_covariance_type: Literal["dense", "diagonal"] = "dense",
+    ) -> GaussianDistribution:
+        mean_function_A = self.prior.prior_A.mean_function
+        mean_function_B = self.prior.prior_B.mean_function
+        A, B, y = self.train_data.A, self.train_data.B, self.train_data.y
+        #noise = self.likelihood.noise_vector(train_data.n)
+
+        Kata = self.prior.prior_A.kernel.cross_covariance(test_inputs_A, A)
+        Kbtb = self.prior.prior_B.kernel.cross_covariance(test_inputs_B, B)
+        Kata = lx.MatrixLinearOperator(Kata)
+        Kbtb = lx.MatrixLinearOperator(Kbtb)
+        Kaat = Kata.transpose()
+        Kbbt = Kbtb.transpose()
+        Katat = self.prior.prior_A.kernel.gram(test_inputs_A)
+        Kbtbt = self.prior.prior_B.kernel.gram(test_inputs_B)
+
+        prior_mean = jnp.kron(mean_function_A(test_inputs_A), mean_function_B(test_inputs_B)).squeeze()
+        res = y - jnp.kron(mean_function_A(A), mean_function_B(B))
+        res = solve_triangular(self.L, res, lower=True)
+        res = solve_triangular(self.L, res, lower=True, trans="T")
+        res = Kronecker(Kata, Kbtb).mv(res)
+
+        mean = prior_mean + res
+
+        prior_cov = Kronecker(Katat, Kbtbt)
+
+        X = Kronecker(Kaat, Kbbt).as_matrix()
+        X = solve_triangular(self.L, X, lower=True)
+        X = solve_triangular(self.L, X, lower=True, trans="T")
+        # Compute Kron(Kata, Kbtb) @ X by vmapping over vec trick
+        X = jax.vmap(Kronecker(Kata, Kbtb).mv, in_axes=1, out_axes=1)(X)
+        X = lx.MatrixLinearOperator(X)
+        jitterOperator = self.jitter * lx.IdentityLinearOperator(X.in_structure())
+        cov = prior_cov - X + jitterOperator
+
+        return GaussianDistribution(loc=jnp.atleast_1d(mean.squeeze()), scale=cov)
