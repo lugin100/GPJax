@@ -242,16 +242,15 @@ class SeparableConjugatePosterior(eqx.Module, tp.Generic[P, L]):
         Katat = kernel_A.gram(test_inputs_A)
         Kbtbt = kernel_B.gram(test_inputs_B)
 
-        L, U, Lambda = compute_Gram_Cholesky(Kaa, Kbb)
-        
-        
-        prior_mean = jnp.kron(mean_function_A(test_inputs_A), mean_function_B(test_inputs_B)).squeeze()
-        residual = y - jnp.kron(mean_function_A(A), mean_function_B(B))
-        res = U.transpose().mv(residual)
-        res = res / Lambda# + noise)
-        res = U.mv(res)
+        L = compute_Gram_Cholesky(Kaa, Kbb)
 
+
+        prior_mean = jnp.kron(mean_function_A(test_inputs_A), mean_function_B(test_inputs_B)).squeeze()
+        res = y - jnp.kron(mean_function_A(A), mean_function_B(B))
+        res = solve_triangular(L, res, lower=True)
+        res = solve_triangular(L, res, lower=True, trans="T")
         res = Kronecker(Kata, Kbtb).mv(res)
+
         mean = prior_mean + res
         
         prior_cov = Kronecker(Katat, Kbtbt)
@@ -274,6 +273,4 @@ def compute_Gram_Cholesky(Kaa, Kbb):
     _, R_A = qr(jnp.diag(jnp.sqrt(Lambda_A)) @ U_A.mT)
     _, R_B = qr(jnp.diag(jnp.sqrt(Lambda_B)) @ U_B.mT)
     L = jnp.kron(R_A, R_B).mT
-    U_A = lx.MatrixLinearOperator(U_A)
-    U_B = lx.MatrixLinearOperator(U_B)
-    return L, Kronecker(U_A, U_B), jnp.kron(Lambda_A, Lambda_B)
+    return L
