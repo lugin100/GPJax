@@ -262,7 +262,8 @@ class SeparableConjugatePosterior(eqx.Module, tp.Generic[P, L]):
         # Compute Kron(Kata, Kbtb) @ X by vmapping over vec trick
         X = jax.vmap(Kronecker(Kata, Kbtb).mv, in_axes=1, out_axes=1)(X)
         X = lx.MatrixLinearOperator(X)
-        cov = prior_cov - X
+        jitterOperator = self.jitter * lx.IdentityLinearOperator(X.in_structure())
+        cov = prior_cov - X + jitterOperator
 
         return GaussianDistribution(loc=jnp.atleast_1d(mean.squeeze()), scale=cov)
 
