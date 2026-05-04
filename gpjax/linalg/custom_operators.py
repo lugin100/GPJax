@@ -154,5 +154,5 @@ def _is_nsd_kronecker(op):
 
 @lx.diagonal.register(Kronecker)
 def diagonal_kronecker(op):
-    return jnp.kron(lx.diagonal(operator.A), lx.diagonal(operator.B))
+    return jnp.kron(lx.diagonal(op.A), lx.diagonal(op.B))
 
