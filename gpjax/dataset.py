@@ -101,13 +101,16 @@ class Dataset:
 
 
 class SeparableDataset(Dataset):
-    r"""Dataset class where the input $X$ is the cartesian product of $A$ and $B$."""
+    r"""Dataset where the input $X$ is the cartesian concatenation of $A$ and $B$."""
 
     A: Num[Array, "N D"]
     B: Num[Array, "M E"]
     y: Num[Array, "N*M 1"]
 
     def __init__(self, A, B, y):
+        # Add feature dimension if not present
+        A = A[:,None] if A.ndim == 1 else A
+        B = B[:,None] if B.ndim == 1 else B
         self.A = A
         self.B = B
         self.y = y
