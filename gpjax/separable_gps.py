@@ -243,14 +243,13 @@ def _compute_Kronecker_Cholesky(A, B):
 
 
 class ConditionedSeparablePosterior():
-
+    r"""A separable posterior conditioned on data and optionally linear functionals."""
     prior: SeparablePrior
     likelihood: tp.Any
     train_data: SeparableDataset
     Kaa: lx.AbstractLinearOperator
     Kbb: lx.AbstractLinearOperator
     L: Num[Array, '...']
-    jitter = 1e-6
 
     def __init__(
         self,
@@ -275,6 +274,17 @@ class ConditionedSeparablePosterior():
         *,
         return_covariance_type: Literal["dense", "diagonal"] = "dense",
     ) -> GaussianDistribution:
+        r"""Infer the posterior distribution at given inputs.
+
+        Args:
+            test_inputs_A: Where to infer on domain A.
+            test_inputs_B: Where to infer on domain B.
+            jitter (float): A small constant added to the diagonal of the
+                covariance matrix to ensure numerical stability.
+
+        Returns:
+            Gaussian distribution over values at test_inputs.
+        """
         return self.predict(
         test_inputs_A,
         test_inputs_B,
@@ -285,9 +295,21 @@ class ConditionedSeparablePosterior():
         self,
         test_inputs_A: Num[Array, "N D"],
         test_inputs_B: Num[Array, "M E"],
+        jitter = 1e-6
         *,
         return_covariance_type: Literal["dense", "diagonal"] = "dense",
     ) -> GaussianDistribution:
+        r"""Infer the posterior distribution at given inputs.
+
+        Args:
+            test_inputs_A: Where to infer on domain A.
+            test_inputs_B: Where to infer on domain B.
+            jitter (float): A small constant added to the diagonal of the
+                covariance matrix to ensure numerical stability.
+
+        Returns:
+            Gaussian distribution over values at test_inputs.
+        """
         mean_function_A = self.prior.prior_A.mean_function
         mean_function_B = self.prior.prior_B.mean_function
         A, B, y = self.train_data.A, self.train_data.B, self.train_data.y
@@ -318,7 +340,7 @@ class ConditionedSeparablePosterior():
         # Compute Kron(Kata, Kbtb) @ X by vmapping over vec trick
         X = jax.vmap(Kronecker(Kata, Kbtb).mv, in_axes=1, out_axes=1)(X)
         X = lx.MatrixLinearOperator(X)
-        jitterOperator = self.jitter * lx.IdentityLinearOperator(X.in_structure())
+        jitterOperator = jitter * lx.IdentityLinearOperator(X.in_structure())
         cov = prior_cov - X + jitterOperator
 
         return GaussianDistribution(loc=jnp.atleast_1d(mean.squeeze()), scale=cov)
