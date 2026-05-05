@@ -24,7 +24,10 @@ PO = tp.TypeVar("PO", bound=AbstractPosterior)
 
 
 class SeparablePrior(eqx.Module):
-    r"""Gaussian process prior over two separable domains."""
+    r"""Gaussian process prior over two spaces $\mathbb{A}$ and $\mathbb{B}$, where mean and kernel are given as:
+    $$m((a,b)) = m_A(a)\cdot m_B(b)$$
+    $$k((a,b), (a^\prime,b^\prime)) = k_A(a, a^\prime)\cdot k_B(b, b^\prime)$$
+    """
 
     prior_A: P
     prior_B: P
@@ -34,7 +37,7 @@ class SeparablePrior(eqx.Module):
         prior_A: P,
         prior_B: P
     ):
-        r"""Construct a Gaussian process prior from two priors defined on different domains.
+        r"""Construct a Gaussian process prior from two priors defined on separable domains.
 
         Args:
             prior_A: Prior defined on domain A.
