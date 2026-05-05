@@ -344,3 +344,17 @@ class ConditionedSeparablePosterior():
         cov = prior_cov - X + jitterOperator
 
         return GaussianDistribution(loc=jnp.atleast_1d(mean.squeeze()), scale=cov)
+
+
+    def condition_on_functional(self, functional, y):
+        kernel_2nd_arg = lambda z_prime: self.prior.kernel(z, z_prime)
+        kLZ = functional(kernel_2nd_arg)(Z)
+        LkZ = kLZ.mT
+        LkL = functional(lambda z: functional(lambda z_prime: self.prior.kernel(z, z_prime)))
+        L_11 = self.L
+        L_21 = solve_triangular(self.L.mT, LkZ)
+        S = LkL - L_21 @ L_21.mT
+        L_22 = cholesky(S)
+        L_12 = jnp.zeros_like(L_21.mT)
+        L_new = jnp.block([[L11, L_12], [L_21, L_22]])
+        self.L = L_new
