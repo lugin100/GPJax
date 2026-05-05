@@ -183,6 +183,7 @@ class SeparablePrior(eqx.Module):
 
 
 class SeparablePosterior(eqx.Module, tp.Generic[P, L]):
+    r"""Posterior to a separable GP prior with Gaussian likelihood."""
 
     prior: SeparablePrior
     likelihood: tp.Any
@@ -201,11 +202,20 @@ class SeparablePosterior(eqx.Module, tp.Generic[P, L]):
         self.prior = prior
         self.likelihood = likelihood
 
+
     def condition_on_data(self, train_data: SeparableDataset):
+        r"""Condition the posterior on data.
+
+        Args:
+            train_data (SeparableDataset): Data to condition on.
+
+        Returns:
+            ConditionedSeparablePosterior
+        """
         A, B, y = train_data.A, train_data.B, train_data.y
         Kaa = self.prior.prior_A.kernel.gram(A)
         Kbb = self.prior.prior_B.kernel.gram(B)
-        L = compute_Gram_Cholesky(Kaa, Kbb)
+        L = _compute_Kronecker_Cholesky(Kaa.as_matrix(), Kbb.as_matrix())
         return ConditionedSeparablePosterior(
             self,
             train_data,
@@ -214,9 +224,18 @@ class SeparablePosterior(eqx.Module, tp.Generic[P, L]):
             L)
 
 
-def compute_Gram_Cholesky(Kaa, Kbb):
-    Lambda_A, U_A = jnp.linalg.eigh(Kaa.as_matrix())
-    Lambda_B, U_B = jnp.linalg.eigh(Kbb.as_matrix())
+def _compute_Kronecker_Cholesky(A, B):
+    r"""Compute the Cholesky decomposition of a Kronecker product:
+    $$ A \otimes B = LL^T$$
+
+    Args:
+        A: Num[Array, '...']
+        B: Num[Array, '...']
+    Returns:
+        $L$
+    """
+    Lambda_A, U_A = jnp.linalg.eigh(A)
+    Lambda_B, U_B = jnp.linalg.eigh(B)
     _, R_A = qr(jnp.diag(jnp.sqrt(Lambda_A)) @ U_A.mT)
     _, R_B = qr(jnp.diag(jnp.sqrt(Lambda_B)) @ U_B.mT)
     L = jnp.kron(R_A, R_B).mT
