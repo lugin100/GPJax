@@ -160,7 +160,7 @@ class SeparablePrior(eqx.Module):
         """
         is_gaussian_likelihood = isinstance(other, Gaussian)
         if is_gaussian_likelihood:
-        	return SeparableConjugatePosterior(prior=self, likelihood=other)
+        	return SeparablePosterior(prior=self, likelihood=other)
        	raise NotImplementedError(
        		"SeparablePrior only supports Gaussian likelihoods."
        		)
@@ -182,7 +182,7 @@ class SeparablePrior(eqx.Module):
         return self.__mul__(other)
 
 
-class SeparableConjugatePosterior(eqx.Module, tp.Generic[P, L]):
+class SeparablePosterior(eqx.Module, tp.Generic[P, L]):
 
     prior: SeparablePrior
     likelihood: tp.Any
@@ -206,7 +206,7 @@ class SeparableConjugatePosterior(eqx.Module, tp.Generic[P, L]):
         Kaa = self.prior.prior_A.kernel.gram(A)
         Kbb = self.prior.prior_B.kernel.gram(B)
         L = compute_Gram_Cholesky(Kaa, Kbb)
-        return SeparablePosteriorConditionedOnData(
+        return ConditionedSeparablePosterior(
             self,
             train_data,
             Kaa,
@@ -223,7 +223,7 @@ def compute_Gram_Cholesky(Kaa, Kbb):
     return L
 
 
-class SeparablePosteriorConditionedOnData():
+class ConditionedSeparablePosterior():
 
     prior: SeparablePrior
     likelihood: tp.Any
@@ -235,7 +235,7 @@ class SeparablePosteriorConditionedOnData():
 
     def __init__(
         self,
-        posterior: SeparableConjugatePosterior,
+        posterior: SeparablePosterior,
         train_data: SeparableDataset,
         Kaa: lx.AbstractLinearOperator,
         Kbb: lx.AbstractLinearOperator,
