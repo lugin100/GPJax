@@ -295,7 +295,7 @@ class ConditionedSeparablePosterior():
         self,
         test_inputs_A: Num[Array, "N D"],
         test_inputs_B: Num[Array, "M E"],
-        jitter = 1e-6
+        jitter = 1e-6,
         *,
         return_covariance_type: Literal["dense", "diagonal"] = "dense",
     ) -> GaussianDistribution:
