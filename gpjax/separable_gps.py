@@ -6,8 +6,9 @@ import jax.numpy as jnp
 from jax.scipy.linalg import (
     qr,
     solve_triangular,
-    cholesky
+#    cholesky
 )
+from jax.lax.linalg import cholesky
 from jaxtyping import (
     Float,
     Num,
@@ -190,6 +191,10 @@ class SeparablePosterior(eqx.Module, tp.Generic[P, L]):
 
     prior: SeparablePrior
     likelihood: tp.Any
+    mean_function_A: tp.Any
+    mean_function_B: tp.Any
+    kernel_A: tp.Any
+    kernel_B: tp.Any
 
     def __init__(
         self,
@@ -204,6 +209,10 @@ class SeparablePosterior(eqx.Module, tp.Generic[P, L]):
         """
         self.prior = prior
         self.likelihood = likelihood
+        self.mean_function_A = prior.prior_A.mean_function
+        self.mean_function_B = prior.prior_B.mean_function
+        self.kernel_A = prior.prior_A.kernel
+        self.kernel_B = prior.prior_B.kernel
 
 
     def condition_on_data(self, train_data: SeparableDataset):
@@ -216,15 +225,18 @@ class SeparablePosterior(eqx.Module, tp.Generic[P, L]):
             ConditionedSeparablePosterior
         """
         A, B, y = train_data.A, train_data.B, train_data.y
-        Kaa = self.prior.prior_A.kernel.gram(A)
-        Kbb = self.prior.prior_B.kernel.gram(B)
+        Kaa = self.kernel_A.gram(A)
+        Kbb = self.kernel_B.gram(B)
         L = _compute_Kronecker_Cholesky(Kaa.as_matrix(), Kbb.as_matrix())
+        
+        prior_eval = jnp.kron(self.mean_function_A(A), self.mean_function_B(B))
         return ConditionedSeparablePosterior(
             self,
             train_data,
             Kaa,
             Kbb,
-            L)
+            L,
+            prior_eval)
 
 
 def _compute_Kronecker_Cholesky(A, B):
@@ -260,7 +272,9 @@ class ConditionedSeparablePosterior():
         train_data: SeparableDataset,
         Kaa: lx.AbstractLinearOperator,
         Kbb: lx.AbstractLinearOperator,
-        L: Num[Array, '...']):
+        L: Num[Array, '...'],
+        prior_eval: Num[Array, '...']
+        ):
         
         self.prior = posterior.prior
         self.likelihood = posterior.likelihood
@@ -270,7 +284,11 @@ class ConditionedSeparablePosterior():
         self.Kaa = Kaa
         self.Kbb = Kbb
         self.L = L
-
+        self.prior_eval = prior_eval
+        self.mean_function_A = posterior.mean_function_A
+        self.mean_function_B = posterior.mean_function_B
+        self.kernel_A = posterior.kernel_A
+        self.kernel_B = posterior.kernel_B
 
     def __call__(
         self,
@@ -315,55 +333,70 @@ class ConditionedSeparablePosterior():
         Returns:
             Gaussian distribution over values at test_inputs.
         """
-        mean_function_A = self.prior.prior_A.mean_function
-        mean_function_B = self.prior.prior_B.mean_function
         #noise = self.likelihood.noise_vector(train_data.n)
 
-        Kata = self.prior.prior_A.kernel.cross_covariance(test_inputs_A, self.A)
-        Kbtb = self.prior.prior_B.kernel.cross_covariance(test_inputs_B, self.B)
-        Kata = lx.MatrixLinearOperator(Kata)
-        Kbtb = lx.MatrixLinearOperator(Kbtb)
-        Kaat = Kata.transpose()
-        Kbbt = Kbtb.transpose()
-        Katat = self.prior.prior_A.kernel.gram(test_inputs_A)
-        Kbtbt = self.prior.prior_B.kernel.gram(test_inputs_B)
+        Kata = self.kernel_A.cross_covariance(test_inputs_A, self.A)
+        Kbtb = self.kernel_B.cross_covariance(test_inputs_B, self.B)
+        KbtL = self.functional(lambda b: self.kernel_B.cross_covariance(test_inputs_B, b))
+        K_test_train = jnp.kron(Kata, Kbtb)
+        K_test_functional = jnp.kron(Kata, KbtL)
+        K_test_conditions = jnp.concatenate((K_test_train, K_test_functional), axis=1)
 
-        prior_mean = jnp.kron(mean_function_A(test_inputs_A), mean_function_B(test_inputs_B)).squeeze()
-        res = self.y - jnp.kron(mean_function_A(self.A), mean_function_B(self.B))
+        #Kata = lx.MatrixLinearOperator(Kata)
+        #Kbtb = lx.MatrixLinearOperator(Kbtb)
+        #Kaat = Kata.transpose()
+        #Kbbt = Kbtb.transpose()
+        Katat = self.kernel_A.gram(test_inputs_A)
+        Kbtbt = self.kernel_B.gram(test_inputs_B)
+
+        prior_mean = jnp.kron(self.mean_function_A(test_inputs_A), self.mean_function_B(test_inputs_B)).squeeze()
+        
+        res = self.y - self.prior_eval
         res = solve_triangular(self.L, res, lower=True)
         res = solve_triangular(self.L, res, lower=True, trans="T")
-        res = Kronecker(Kata, Kbtb).mv(res)
+        #res = Kronecker(Kata, Kbtb).mv(res)
+        res = K_test_conditions @ res
 
-        mean = prior_mean + res
+        mean = prior_mean[:,None] + res
 
         prior_cov = Kronecker(Katat, Kbtbt)
 
-        X = Kronecker(Kaat, Kbbt).as_matrix()
+        #X = Kronecker(Kaat, Kbbt).as_matrix()
+        X = K_test_conditions.mT
+        self.L = self.L + jitter * jnp.eye(self.L.shape[0])
         X = solve_triangular(self.L, X, lower=True)
         X = solve_triangular(self.L, X, lower=True, trans="T")
         # Compute Kron(Kata, Kbtb) @ X by vmapping over vec trick
-        X = jax.vmap(Kronecker(Kata, Kbtb).mv, in_axes=1, out_axes=1)(X)
+        #X = jax.vmap(Kronecker(Kata, Kbtb).mv, in_axes=1, out_axes=1)(X)
+        X = K_test_conditions @ X
         X = lx.MatrixLinearOperator(X)
         jitterOperator = jitter * lx.IdentityLinearOperator(X.in_structure())
         cov = prior_cov - X + jitterOperator
-
         return GaussianDistribution(loc=jnp.atleast_1d(mean.squeeze()), scale=cov)
 
 
-    def condition_on_functional(self, functional, y):
-        LkB = functional(lambda b: self.prior.prior_B.kernel.cross_covariance(b, self.B))
+    def condition_on_functional(self, functional, y, jitter=1e-3):
+        LkB = functional(lambda b: self.kernel_B.cross_covariance(b, self.B))
+        
+        #kLB = LkB.mT
         LkZ = jnp.kron(self.Kaa.as_matrix(), LkB)
         kLZ = LkZ.mT
-        LkL = jnp.kron(self.Kaa.as_matrix(), functional(lambda b: functional(lambda b_prime: self.prior.prior_B.kernel.cross_covariance(b, b_prime))))
+        LkL = functional(lambda b: functional(lambda b_prime: self.kernel_B.cross_covariance(b, b_prime)))
+        LkL = jnp.kron(self.Kaa.as_matrix(), LkL)
         L_11 = self.L
-        print(L_11.shape)
-        print(LkZ.shape)
-        print(LkL.shape)
         L_21 = solve_triangular(self.L, kLZ).mT
         L_12 = jnp.zeros_like(L_21.mT)
-        S = LkL - L_21 @ L_21.mT
-        L_22 = cholesky(S)
+        S = LkL - L_21 @ L_21.mT + jitter * jnp.eye(LkL.shape[0])
+        eigvals = jnp.linalg.eigvalsh(S)
+        print(eigvals.min())
+        L_22 = cholesky(S, symmetrize_input=True)
         L_new = jnp.block([[L_11, L_12], [L_21, L_22]])
         self.L = L_new
-        self.y = jnp.concatenate((self.y, y), axis=0)
+        print(jnp.any(jnp.isnan(S)))
+        print(jnp.any(jnp.isnan(L_22)))
+        self.y = jnp.concatenate((self.y, jnp.tile(y, (self.Kaa.as_matrix().shape[0],1))), axis=0)
+        
+        functional_eval = jnp.kron(self.mean_function_A(self.A), functional(self.mean_function_B))
+        self.prior_eval = jnp.concatenate((self.prior_eval, functional_eval), axis=0)
+        self.functional = functional
         return self
