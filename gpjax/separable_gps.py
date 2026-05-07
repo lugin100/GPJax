@@ -3,8 +3,11 @@ from typing import Literal
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-from jax.numpy.linalg import qr
-from jax.scipy.linalg import solve_triangular
+from jax.scipy.linalg import (
+    qr,
+    solve_triangular,
+    cholesky
+)
 from jaxtyping import (
     Float,
     Num,
@@ -261,7 +264,9 @@ class ConditionedSeparablePosterior():
         
         self.prior = posterior.prior
         self.likelihood = posterior.likelihood
-        self.train_data = train_data
+        self.A = train_data.A
+        self.B = train_data.B
+        self.y = train_data.y
         self.Kaa = Kaa
         self.Kbb = Kbb
         self.L = L
@@ -312,11 +317,10 @@ class ConditionedSeparablePosterior():
         """
         mean_function_A = self.prior.prior_A.mean_function
         mean_function_B = self.prior.prior_B.mean_function
-        A, B, y = self.train_data.A, self.train_data.B, self.train_data.y
         #noise = self.likelihood.noise_vector(train_data.n)
 
-        Kata = self.prior.prior_A.kernel.cross_covariance(test_inputs_A, A)
-        Kbtb = self.prior.prior_B.kernel.cross_covariance(test_inputs_B, B)
+        Kata = self.prior.prior_A.kernel.cross_covariance(test_inputs_A, self.A)
+        Kbtb = self.prior.prior_B.kernel.cross_covariance(test_inputs_B, self.B)
         Kata = lx.MatrixLinearOperator(Kata)
         Kbtb = lx.MatrixLinearOperator(Kbtb)
         Kaat = Kata.transpose()
@@ -325,7 +329,7 @@ class ConditionedSeparablePosterior():
         Kbtbt = self.prior.prior_B.kernel.gram(test_inputs_B)
 
         prior_mean = jnp.kron(mean_function_A(test_inputs_A), mean_function_B(test_inputs_B)).squeeze()
-        res = y - jnp.kron(mean_function_A(A), mean_function_B(B))
+        res = self.y - jnp.kron(mean_function_A(self.A), mean_function_B(self.B))
         res = solve_triangular(self.L, res, lower=True)
         res = solve_triangular(self.L, res, lower=True, trans="T")
         res = Kronecker(Kata, Kbtb).mv(res)
@@ -347,14 +351,19 @@ class ConditionedSeparablePosterior():
 
 
     def condition_on_functional(self, functional, y):
-        kernel_2nd_arg = lambda z_prime: self.prior.kernel(z, z_prime)
-        kLZ = functional(kernel_2nd_arg)(Z)
-        LkZ = kLZ.mT
-        LkL = functional(lambda z: functional(lambda z_prime: self.prior.kernel(z, z_prime)))
+        LkB = functional(lambda b: self.prior.prior_B.kernel.cross_covariance(b, self.B))
+        LkZ = jnp.kron(self.Kaa.as_matrix(), LkB)
+        kLZ = LkZ.mT
+        LkL = jnp.kron(self.Kaa.as_matrix(), functional(lambda b: functional(lambda b_prime: self.prior.prior_B.kernel.cross_covariance(b, b_prime))))
         L_11 = self.L
-        L_21 = solve_triangular(self.L.mT, LkZ)
+        print(L_11.shape)
+        print(LkZ.shape)
+        print(LkL.shape)
+        L_21 = solve_triangular(self.L, kLZ).mT
+        L_12 = jnp.zeros_like(L_21.mT)
         S = LkL - L_21 @ L_21.mT
         L_22 = cholesky(S)
-        L_12 = jnp.zeros_like(L_21.mT)
-        L_new = jnp.block([[L11, L_12], [L_21, L_22]])
+        L_new = jnp.block([[L_11, L_12], [L_21, L_22]])
         self.L = L_new
+        self.y = jnp.concatenate((self.y, y), axis=0)
+        return self
