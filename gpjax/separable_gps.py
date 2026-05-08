@@ -6,9 +6,8 @@ import jax.numpy as jnp
 from jax.scipy.linalg import (
     qr,
     solve_triangular,
-#    cholesky
+    cholesky
 )
-from jax.lax.linalg import cholesky
 from jaxtyping import (
     Float,
     Num,
@@ -337,38 +336,39 @@ class ConditionedSeparablePosterior():
 
         Kata = self.kernel_A.cross_covariance(test_inputs_A, self.A)
         Kbtb = self.kernel_B.cross_covariance(test_inputs_B, self.B)
-        KbtL = self.functional(lambda b: self.kernel_B.cross_covariance(test_inputs_B, b))
-        K_test_train = jnp.kron(Kata, Kbtb)
-        K_test_functional = jnp.kron(Kata, KbtL)
-        K_test_conditions = jnp.concatenate((K_test_train, K_test_functional), axis=1)
+        #KbtL = self.functional(lambda b: self.kernel_B.cross_covariance(test_inputs_B, b))
+        #K_test_train = jnp.kron(Kata, Kbtb)
+        #K_test_functional = jnp.kron(Kata, KbtL)
+        #K_test_conditions = jnp.concatenate((K_test_train, K_test_functional), axis=1)
 
-        #Kata = lx.MatrixLinearOperator(Kata)
-        #Kbtb = lx.MatrixLinearOperator(Kbtb)
-        #Kaat = Kata.transpose()
-        #Kbbt = Kbtb.transpose()
-        Katat = self.kernel_A.gram(test_inputs_A)
-        Kbtbt = self.kernel_B.gram(test_inputs_B)
+        Kata = lx.MatrixLinearOperator(Kata)
+        Kbtb = lx.MatrixLinearOperator(Kbtb)
+        Kaat = Kata.transpose()
+        Kbbt = Kbtb.transpose()
+        
 
         prior_mean = jnp.kron(self.mean_function_A(test_inputs_A), self.mean_function_B(test_inputs_B)).squeeze()
         
         res = self.y - self.prior_eval
         res = solve_triangular(self.L, res, lower=True)
         res = solve_triangular(self.L, res, lower=True, trans="T")
-        #res = Kronecker(Kata, Kbtb).mv(res)
-        res = K_test_conditions @ res
+        res = Kronecker(Kata, Kbtb).mv(res)
+        #res = K_test_conditions @ res
 
-        mean = prior_mean[:,None] + res
+        mean = prior_mean + res
 
+        Katat = self.kernel_A.gram(test_inputs_A)
+        Kbtbt = self.kernel_B.gram(test_inputs_B)
         prior_cov = Kronecker(Katat, Kbtbt)
 
-        #X = Kronecker(Kaat, Kbbt).as_matrix()
-        X = K_test_conditions.mT
-        self.L = self.L + jitter * jnp.eye(self.L.shape[0])
+        X = Kronecker(Kaat, Kbbt).as_matrix()
+        #X = K_test_conditions.mT
+        #self.L = self.L + jitter * jnp.eye(self.L.shape[0])
         X = solve_triangular(self.L, X, lower=True)
         X = solve_triangular(self.L, X, lower=True, trans="T")
         # Compute Kron(Kata, Kbtb) @ X by vmapping over vec trick
-        #X = jax.vmap(Kronecker(Kata, Kbtb).mv, in_axes=1, out_axes=1)(X)
-        X = K_test_conditions @ X
+        X = jax.vmap(Kronecker(Kata, Kbtb).mv, in_axes=1, out_axes=1)(X)
+        #X = K_test_conditions @ X
         X = lx.MatrixLinearOperator(X)
         jitterOperator = jitter * lx.IdentityLinearOperator(X.in_structure())
         cov = prior_cov - X + jitterOperator
@@ -376,24 +376,22 @@ class ConditionedSeparablePosterior():
 
 
     def condition_on_functional(self, functional, y, jitter=1e-3):
-        LkB = functional(lambda b: self.kernel_B.cross_covariance(b, self.B))
+        LkZ = functional(lambda a,b: self.kernel_A.cross_covariance(a, self.A)*self.kernel_B.cross_covariance(b, self.B))
         
-        #kLB = LkB.mT
-        LkZ = jnp.kron(self.Kaa.as_matrix(), LkB)
         kLZ = LkZ.mT
-        LkL = functional(lambda b: functional(lambda b_prime: self.kernel_B.cross_covariance(b, b_prime)))
-        LkL = jnp.kron(self.Kaa.as_matrix(), LkL)
+        LkL = functional(lambda a,b: functional(lambda a_prime, b_prime: self.kernel_A.cross_covariance(a, a_prime)*self.kernel_B.cross_covariance(b, b_prime)))
+
         L_11 = self.L
         L_21 = solve_triangular(self.L, kLZ).mT
         L_12 = jnp.zeros_like(L_21.mT)
-        S = LkL - L_21 @ L_21.mT + jitter * jnp.eye(LkL.shape[0])
-        eigvals = jnp.linalg.eigvalsh(S)
-        print(eigvals.min())
-        L_22 = cholesky(S, symmetrize_input=True)
+        S = LkL - L_21 @ L_21.mT #+ jitter * jnp.eye(LkL.shape[0])
+        #eigvals = jnp.linalg.eigvalsh(S)
+        #print(eigvals.min())
+        L_22 = cholesky(S)
         L_new = jnp.block([[L_11, L_12], [L_21, L_22]])
         self.L = L_new
-        print(jnp.any(jnp.isnan(S)))
-        print(jnp.any(jnp.isnan(L_22)))
+        #print(jnp.any(jnp.isnan(S)))
+        #print(jnp.any(jnp.isnan(L_22)))
         self.y = jnp.concatenate((self.y, jnp.tile(y, (self.Kaa.as_matrix().shape[0],1))), axis=0)
         
         functional_eval = jnp.kron(self.mean_function_A(self.A), functional(self.mean_function_B))
