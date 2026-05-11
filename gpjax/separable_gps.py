@@ -265,7 +265,7 @@ class ConditionedSeparablePosterior():
         posterior: SeparablePosterior,
         train_data: SeparableDataset,
         L: Num[Array, '...'],
-        residual: Num[Array, '...']
+        residual
         ):
         
         self.prior = posterior.prior
@@ -274,7 +274,7 @@ class ConditionedSeparablePosterior():
         self.B = train_data.B
         self.y = train_data.y
         self.L = L
-        self.residual = residual
+        self.residual_list = [residual]
         self.mean_function_A = posterior.mean_function_A
         self.mean_function_B = posterior.mean_function_B
         self.kernel_A = posterior.kernel_A
@@ -341,7 +341,7 @@ class ConditionedSeparablePosterior():
         # Posterior mean
         prior_mean = jnp.kron(self.mean_function_A(test_inputs_A), self.mean_function_B(test_inputs_B)).squeeze()
         
-        res = self.residual
+        res = jnp.concatenate(self.residual_list, axis=0)
         res = solve_triangular(self.L, res, lower=True)
         res = solve_triangular(self.L, res, lower=True, trans="T")
         #res = Kronecker(Kata, Kbtb).mv(res)
@@ -386,9 +386,9 @@ class ConditionedSeparablePosterior():
             L_new = jnp.block([[L_11, L_12], [L_21, L_22]])
             self.L = L_new
             new_y = jnp.tile(y, (Katat.shape[0],1))
-            functional_eval = jnp.kron(self.mean_function_A(A_test), functional(self.mean_function_B))
-            
-            self.residual = jnp.concatenate((self.residual, new_y - functional_eval), axis=0)
+            mLZ = jnp.kron(self.mean_function_A(A_test), functional(self.mean_function_B))
+            new_residual = new_y - mLZ
+            self.residual_list.append(new_residual)
             LkBt = LkB = functional(lambda b: self.kernel_B.cross_covariance(b, B_test))
             self.LkZt = jnp.kron(Katat, LkBt)
         self.condition_using_test_points = condition_using_test_points
