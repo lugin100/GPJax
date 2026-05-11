@@ -334,9 +334,9 @@ class ConditionedSeparablePosterior():
         # Evaluate lazy conditioning now
         self.condition_using_test_points(Kata, Katat.as_matrix(), test_inputs_A, test_inputs_B)
 
-        K_train_test = jnp.kron(Kata.mT, Kbtb.mT)
-        K_conditions_test = jnp.concatenate((K_train_test, self.LkZt), axis=0)
-        K_test_conditions = jnp.concatenate((K_train_test.mT, self.LkZt.mT), axis=1)
+        K_test_train = jnp.kron(Kata, Kbtb)
+        K_test_conditions = jnp.concatenate((K_test_train, self.kLZt), axis=1)
+        K_conditions_test = K_test_conditions.mT
         
         # Posterior mean
         prior_mean = jnp.kron(self.mean_function_A(test_inputs_A), self.mean_function_B(test_inputs_B)).squeeze()
@@ -389,7 +389,7 @@ class ConditionedSeparablePosterior():
             mLZ = jnp.kron(self.mean_function_A(A_test), functional(self.mean_function_B))
             new_residual = new_y - mLZ
             self.residual_list.append(new_residual)
-            LkBt = LkB = functional(lambda b: self.kernel_B.cross_covariance(b, B_test))
-            self.LkZt = jnp.kron(Katat, LkBt)
+            kLBt = functional(lambda b_prime: self.kernel_B.cross_covariance(B_test, b_prime))
+            self.kLZt = jnp.kron(Katat, kLBt)
         self.condition_using_test_points = condition_using_test_points
         return self
