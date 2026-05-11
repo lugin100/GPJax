@@ -272,7 +272,6 @@ class ConditionedSeparablePosterior():
         self.likelihood = posterior.likelihood
         self.A = train_data.A
         self.B = train_data.B
-        self.y = train_data.y
         self.L = L
         self.residual_list = [residual]
         self.mean_function_A = posterior.mean_function_A
@@ -344,7 +343,6 @@ class ConditionedSeparablePosterior():
         res = jnp.concatenate(self.residual_list, axis=0)
         res = solve_triangular(self.L, res, lower=True)
         res = solve_triangular(self.L, res, lower=True, trans="T")
-        #res = Kronecker(Kata, Kbtb).mv(res)
         res = K_test_conditions @ res
         mean = prior_mean[:,None] + res
 
@@ -354,8 +352,6 @@ class ConditionedSeparablePosterior():
         X = K_conditions_test
         X = solve_triangular(self.L, X, lower=True)
         X = solve_triangular(self.L, X, lower=True, trans="T")
-        # Compute Kron(Kata, Kbtb) @ X by vmapping over vec trick
-        #X = jax.vmap(Kronecker(Kata, Kbtb).mv, in_axes=1, out_axes=1)(X)
         X = K_test_conditions @ X
 
         X = lx.MatrixLinearOperator(X)
@@ -374,10 +370,10 @@ class ConditionedSeparablePosterior():
             LkZ = jnp.kron(Kata, LkB)
             kLZ = LkZ.mT
             LkLZ = jnp.kron(Katat, LkLB)
+
             L_11 = self.L #+ jitter * jnp.eye(self.L.shape[0])
             Q, R = qr(L_11)
             L_21 = solve_triangular(R, Q.T @ kLZ).mT
-
             L_12 = jnp.zeros_like(L_21.mT)
             S = LkLZ - L_21 @ L_21.mT + jitter * jnp.eye(LkLZ.shape[0])
             eigvals = jnp.linalg.eigvalsh(S)
@@ -385,11 +381,13 @@ class ConditionedSeparablePosterior():
             L_22 = cholesky(S)
             L_new = jnp.block([[L_11, L_12], [L_21, L_22]])
             self.L = L_new
+
             new_y = jnp.tile(y, (Katat.shape[0],1))
             mLZ = jnp.kron(self.mean_function_A(A_test), functional(self.mean_function_B))
-            new_residual = new_y - mLZ
-            self.residual_list.append(new_residual)
+            self.residual_list.append(new_y - mLZ)
+
             kLBt = functional(lambda b_prime: self.kernel_B.cross_covariance(B_test, b_prime))
             self.kLZt = jnp.kron(Katat, kLBt)
+
         self.condition_using_test_points = condition_using_test_points
         return self
