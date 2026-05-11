@@ -269,20 +269,33 @@ class ConditionedSeparablePosterior():
         """
         if self.L is not None:
             raise ValueError("Must call condition_on_data before condition_on_functional")
+
         self.A = train_data.A
         self.B = train_data.B
-        Kaa = self.kernel_A.gram(self.A).as_matrix()
-        Kbb = self.kernel_B.gram(self.B).as_matrix()
-        self.L = _compute_Kronecker_Cholesky(Kaa, Kbb)
-        residual = train_data.y - jnp.kron(self.mean_function_A(self.A), self.mean_function_B(self.B))
-        self.residual_list.append(residual)
+
+        def condition_using_test_points(Kata, Kbtb, Katat, A_test, B_test):
+
+            # Compute L
+            Kaa = self.kernel_A.gram(self.A).as_matrix()
+            Kbb = self.kernel_B.gram(self.B).as_matrix()
+            self.L = _compute_Kronecker_Cholesky(Kaa, Kbb)
+            
+            # Append residuals
+            residual = train_data.y - jnp.kron(self.mean_function_A(self.A), self.mean_function_B(self.B))
+            self.residual_list.append(residual)
+            
+            # Append K_test_conditions
+            K_test_train = jnp.kron(Kata, Kbtb)
+            self.K_test_condition_list.append(K_test_train)
+
+        self.computations.append(condition_using_test_points)
         return self
 
     def condition_on_functional(self, functional, y, jitter=1e-1):
-        if self.L is None:
-            raise ValueError("Must call condition_on_function after condition_on_data")
+        if len(self.computations) is 0:
+            raise ValueError("Must call condition_on_functional after condition_on_data")
 
-        def condition_using_test_points(Kata, Katat, A_test, B_test):
+        def condition_using_test_points(Kata, Kbtb, Katat, A_test, B_test):
             LkB = functional(lambda b: self.kernel_B.cross_covariance(b, self.B))        
             LkLB = functional(lambda b: functional(lambda b_prime: self.kernel_B.cross_covariance(b, b_prime)))
             LkZ = jnp.kron(Kata, LkB)
@@ -334,7 +347,7 @@ class ConditionedSeparablePosterior():
         Returns:
             Gaussian distribution over values at test_inputs.
         """
-        if self.L is None:
+        if len(self.computations) is 0:
             raise ValueError("Cannot predict using an unconditioned posterior")
 
         #noise = self.likelihood.noise_vector(train_data.n)
@@ -344,12 +357,9 @@ class ConditionedSeparablePosterior():
         Kbtb = self.kernel_B.cross_covariance(test_inputs_B, self.B)
         Katat = self.kernel_A.gram(test_inputs_A)
         Kbtbt = self.kernel_B.gram(test_inputs_B)
-        
-        K_test_train = jnp.kron(Kata, Kbtb)
-        self.K_test_condition_list.append(K_test_train)
 
         # Evaluate lazy conditioning now
-        [computation(Kata, Katat.as_matrix(), test_inputs_A, test_inputs_B) for computation in self.computations]
+        [computation(Kata, Kbtb, Katat.as_matrix(), test_inputs_A, test_inputs_B) for computation in self.computations]
 
 
         K_test_conditions = jnp.concatenate(self.K_test_condition_list, axis=1)
