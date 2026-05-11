@@ -270,15 +270,16 @@ class ConditionedSeparablePosterior():
         
         self.prior = posterior.prior
         self.likelihood = posterior.likelihood
+        self.mean_function_A = posterior.mean_function_A
+        self.mean_function_B = posterior.mean_function_B
+        self.kernel_A = posterior.kernel_A
+        self.kernel_B = posterior.kernel_B
         self.A = train_data.A
         self.B = train_data.B
         self.L = L
         self.residual_list = [residual]
         self.K_test_condition_list = []
-        self.mean_function_A = posterior.mean_function_A
-        self.mean_function_B = posterior.mean_function_B
-        self.kernel_A = posterior.kernel_A
-        self.kernel_B = posterior.kernel_B
+        self.computations = []
 
 
     def condition_on_functional(self, functional, y, jitter=1e-1):
@@ -312,7 +313,7 @@ class ConditionedSeparablePosterior():
             kLZt = jnp.kron(Katat, kLBt)
             self.K_test_condition_list.append(kLZt)
 
-        self.condition_using_test_points = condition_using_test_points
+        self.computations.append(condition_using_test_points)
         return self
 
 
@@ -347,7 +348,7 @@ class ConditionedSeparablePosterior():
         self.K_test_condition_list.append(K_test_train)
 
         # Evaluate lazy conditioning now
-        self.condition_using_test_points(Kata, Katat.as_matrix(), test_inputs_A, test_inputs_B)
+        [computation(Kata, Katat.as_matrix(), test_inputs_A, test_inputs_B) for computation in self.computations]
 
 
         K_test_conditions = jnp.concatenate(self.K_test_condition_list, axis=1)
@@ -355,7 +356,7 @@ class ConditionedSeparablePosterior():
         
         # Posterior mean
         prior_mean = jnp.kron(self.mean_function_A(test_inputs_A), self.mean_function_B(test_inputs_B)).squeeze()
-        
+
         res = jnp.concatenate(self.residual_list, axis=0)
         res = solve_triangular(self.L, res, lower=True)
         res = solve_triangular(self.L, res, lower=True, trans="T")
