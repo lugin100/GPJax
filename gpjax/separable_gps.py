@@ -213,26 +213,8 @@ class SeparablePosterior(eqx.Module, tp.Generic[P, L]):
         self.kernel_A = prior.prior_A.kernel
         self.kernel_B = prior.prior_B.kernel
 
-
-    def condition_on_data(self, train_data: SeparableDataset):
-        r"""Condition the posterior on data.
-
-        Args:
-            train_data (SeparableDataset): Data to condition on.
-
-        Returns:
-            ConditionedSeparablePosterior
-        """
-        A, B, y = train_data.A, train_data.B, train_data.y
-        Kaa = self.kernel_A.gram(A).as_matrix()
-        Kbb = self.kernel_B.gram(B).as_matrix()
-        L = _compute_Kronecker_Cholesky(Kaa, Kbb)
-        residual = y - jnp.kron(self.mean_function_A(A), self.mean_function_B(B))
-        return ConditionedSeparablePosterior(
-            self,
-            train_data,
-            L,
-            residual)
+    def cast(self):
+        return ConditionedSeparablePosterior(self)
 
 
 def _compute_Kronecker_Cholesky(A, B):
@@ -257,15 +239,10 @@ class ConditionedSeparablePosterior():
     r"""A separable posterior conditioned on data and optionally linear functionals."""
     prior: SeparablePrior
     likelihood: tp.Any
-    train_data: SeparableDataset
-    L: Num[Array, '...']
 
     def __init__(
         self,
         posterior: SeparablePosterior,
-        train_data: SeparableDataset,
-        L: Num[Array, '...'],
-        residual
         ):
         
         self.prior = posterior.prior
@@ -274,13 +251,29 @@ class ConditionedSeparablePosterior():
         self.mean_function_B = posterior.mean_function_B
         self.kernel_A = posterior.kernel_A
         self.kernel_B = posterior.kernel_B
-        self.A = train_data.A
-        self.B = train_data.B
-        self.L = L
-        self.residual_list = [residual]
+
+        self.residual_list = []
         self.K_test_condition_list = []
         self.computations = []
 
+
+    def condition_on_data(self, train_data: SeparableDataset):
+        r"""Condition the posterior on data.
+
+        Args:
+            train_data (SeparableDataset): Data to condition on.
+
+        Returns:
+            ConditionedSeparablePosterior
+        """
+        self.A = train_data.A
+        self.B = train_data.B
+        Kaa = self.kernel_A.gram(self.A).as_matrix()
+        Kbb = self.kernel_B.gram(self.B).as_matrix()
+        self.L = _compute_Kronecker_Cholesky(Kaa, Kbb)
+        residual = train_data.y - jnp.kron(self.mean_function_A(self.A), self.mean_function_B(self.B))
+        self.residual_list.append(residual)
+        return self
 
     def condition_on_functional(self, functional, y, jitter=1e-1):
 
