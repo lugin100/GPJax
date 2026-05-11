@@ -263,9 +263,6 @@ class ConditionedSeparablePosterior():
 
         Args:
             train_data (SeparableDataset): Data to condition on.
-
-        Returns:
-            ConditionedSeparablePosterior
         """
         if self.L is not None:
             raise ValueError("Must call condition_on_data before condition_on_functional")
@@ -289,7 +286,7 @@ class ConditionedSeparablePosterior():
             self.K_test_condition_list.append(K_test_train)
 
         self.computations.append(condition_using_test_points)
-        return self
+
 
     def condition_on_functional(self, functional, y, jitter=1e-1):
         if len(self.computations) is 0:
@@ -325,7 +322,6 @@ class ConditionedSeparablePosterior():
             self.K_test_condition_list.append(kLZt)
 
         self.computations.append(condition_using_test_points)
-        return self
 
 
     def predict(
