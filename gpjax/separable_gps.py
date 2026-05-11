@@ -274,6 +274,7 @@ class ConditionedSeparablePosterior():
         self.B = train_data.B
         self.L = L
         self.residual_list = [residual]
+        self.K_test_condition_list = []
         self.mean_function_A = posterior.mean_function_A
         self.mean_function_B = posterior.mean_function_B
         self.kernel_A = posterior.kernel_A
@@ -289,6 +290,7 @@ class ConditionedSeparablePosterior():
             kLZ = LkZ.mT
             LkLZ = jnp.kron(Katat, LkLB)
 
+            # Update L
             L_11 = self.L #+ jitter * jnp.eye(self.L.shape[0])
             Q, R = qr(L_11)
             L_21 = solve_triangular(R, Q.T @ kLZ).mT
@@ -300,12 +302,15 @@ class ConditionedSeparablePosterior():
             L_new = jnp.block([[L_11, L_12], [L_21, L_22]])
             self.L = L_new
 
-            new_y = jnp.tile(y, (Katat.shape[0],1))
+            # Append residuals
+            new_y = jnp.tile(y, (A_test.shape[0],1))
             mLZ = jnp.kron(self.mean_function_A(A_test), functional(self.mean_function_B))
             self.residual_list.append(new_y - mLZ)
 
+            # Append K_test_conditions
             kLBt = functional(lambda b_prime: self.kernel_B.cross_covariance(B_test, b_prime))
-            self.kLZt = jnp.kron(Katat, kLBt)
+            kLZt = jnp.kron(Katat, kLBt)
+            self.K_test_condition_list.append(kLZt)
 
         self.condition_using_test_points = condition_using_test_points
         return self
@@ -338,11 +343,14 @@ class ConditionedSeparablePosterior():
         Katat = self.kernel_A.gram(test_inputs_A)
         Kbtbt = self.kernel_B.gram(test_inputs_B)
         
+        K_test_train = jnp.kron(Kata, Kbtb)
+        self.K_test_condition_list.append(K_test_train)
+
         # Evaluate lazy conditioning now
         self.condition_using_test_points(Kata, Katat.as_matrix(), test_inputs_A, test_inputs_B)
 
-        K_test_train = jnp.kron(Kata, Kbtb)
-        K_test_conditions = jnp.concatenate((K_test_train, self.kLZt), axis=1)
+
+        K_test_conditions = jnp.concatenate(self.K_test_condition_list, axis=1)
         K_conditions_test = K_test_conditions.mT
         
         # Posterior mean
