@@ -244,7 +244,7 @@ class ConditionedSeparablePosterior():
         self,
         posterior: SeparablePosterior,
         ):
-        
+
         self.prior = posterior.prior
         self.likelihood = posterior.likelihood
         self.mean_function_A = posterior.mean_function_A
@@ -276,11 +276,11 @@ class ConditionedSeparablePosterior():
             Kaa = self.kernel_A.gram(self.A).as_matrix()
             Kbb = self.kernel_B.gram(self.B).as_matrix()
             self.L = _compute_Kronecker_Cholesky(Kaa, Kbb)
-            
+
             # Append residuals
             residual = train_data.y - jnp.kron(self.mean_function_A(self.A), self.mean_function_B(self.B))
             self.residual_list.append(residual)
-            
+
             # Append K_test_conditions
             K_test_train = jnp.kron(Kata, Kbtb)
             self.K_test_condition_list.append(K_test_train)
@@ -360,7 +360,7 @@ class ConditionedSeparablePosterior():
 
         K_test_conditions = jnp.concatenate(self.K_test_condition_list, axis=1)
         K_conditions_test = K_test_conditions.mT
-        
+
         # Posterior mean
         prior_mean = jnp.kron(self.mean_function_A(test_inputs_A), self.mean_function_B(test_inputs_B)).squeeze()
 
