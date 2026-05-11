@@ -224,16 +224,13 @@ class SeparablePosterior(eqx.Module, tp.Generic[P, L]):
             ConditionedSeparablePosterior
         """
         A, B, y = train_data.A, train_data.B, train_data.y
-        Kaa = self.kernel_A.gram(A)
-        Kbb = self.kernel_B.gram(B)
-        L = _compute_Kronecker_Cholesky(Kaa.as_matrix(), Kbb.as_matrix())
-        
+        Kaa = self.kernel_A.gram(A).as_matrix()
+        Kbb = self.kernel_B.gram(B).as_matrix()
+        L = _compute_Kronecker_Cholesky(Kaa, Kbb)
         residual = y - jnp.kron(self.mean_function_A(A), self.mean_function_B(B))
         return ConditionedSeparablePosterior(
             self,
             train_data,
-            Kaa,
-            Kbb,
             L,
             residual)
 
@@ -261,16 +258,12 @@ class ConditionedSeparablePosterior():
     prior: SeparablePrior
     likelihood: tp.Any
     train_data: SeparableDataset
-    Kaa: lx.AbstractLinearOperator
-    Kbb: lx.AbstractLinearOperator
     L: Num[Array, '...']
 
     def __init__(
         self,
         posterior: SeparablePosterior,
         train_data: SeparableDataset,
-        Kaa: lx.AbstractLinearOperator,
-        Kbb: lx.AbstractLinearOperator,
         L: Num[Array, '...'],
         residual: Num[Array, '...']
         ):
@@ -280,8 +273,6 @@ class ConditionedSeparablePosterior():
         self.A = train_data.A
         self.B = train_data.B
         self.y = train_data.y
-        self.Kaa = Kaa
-        self.Kbb = Kbb
         self.L = L
         self.residual = residual
         self.mean_function_A = posterior.mean_function_A
