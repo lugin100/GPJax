@@ -252,6 +252,7 @@ class ConditionedSeparablePosterior():
         self.kernel_A = posterior.kernel_A
         self.kernel_B = posterior.kernel_B
 
+        self.L = None
         self.residual_list = []
         self.K_test_condition_list = []
         self.computations = []
@@ -266,6 +267,8 @@ class ConditionedSeparablePosterior():
         Returns:
             ConditionedSeparablePosterior
         """
+        if self.L is not None:
+            raise ValueError("Must call condition_on_data before condition_on_functional")
         self.A = train_data.A
         self.B = train_data.B
         Kaa = self.kernel_A.gram(self.A).as_matrix()
@@ -276,6 +279,8 @@ class ConditionedSeparablePosterior():
         return self
 
     def condition_on_functional(self, functional, y, jitter=1e-1):
+        if self.L is None:
+            raise ValueError("Must call condition_on_function after condition_on_data")
 
         def condition_using_test_points(Kata, Katat, A_test, B_test):
             LkB = functional(lambda b: self.kernel_B.cross_covariance(b, self.B))        
@@ -329,6 +334,9 @@ class ConditionedSeparablePosterior():
         Returns:
             Gaussian distribution over values at test_inputs.
         """
+        if self.L is None:
+            raise ValueError("Cannot predict using an unconditioned posterior")
+
         #noise = self.likelihood.noise_vector(train_data.n)
 
         # Kernel computations
