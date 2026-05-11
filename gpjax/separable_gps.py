@@ -279,29 +279,37 @@ class ConditionedSeparablePosterior():
         self.kernel_A = posterior.kernel_A
         self.kernel_B = posterior.kernel_B
 
-    def __call__(
-        self,
-        test_inputs_A: Num[Array, "N D"],
-        test_inputs_B: Num[Array, "M E"],
-        *,
-        return_covariance_type: Literal["dense", "diagonal"] = "dense",
-    ) -> GaussianDistribution:
-        r"""Infer the posterior distribution at given inputs.
 
-        Args:
-            test_inputs_A: Where to infer on domain A.
-            test_inputs_B: Where to infer on domain B.
-            jitter (float): A small constant added to the diagonal of the
-                covariance matrix to ensure numerical stability.
+    def condition_on_functional(self, functional, y, jitter=1e-1):
 
-        Returns:
-            Gaussian distribution over values at test_inputs.
-        """
-        return self.predict(
-        test_inputs_A,
-        test_inputs_B,
-        return_covariance_type=return_covariance_type,
-    )
+        def condition_using_test_points(Kata, Katat, A_test, B_test):
+            LkB = functional(lambda b: self.kernel_B.cross_covariance(b, self.B))        
+            LkLB = functional(lambda b: functional(lambda b_prime: self.kernel_B.cross_covariance(b, b_prime)))
+            LkZ = jnp.kron(Kata, LkB)
+            kLZ = LkZ.mT
+            LkLZ = jnp.kron(Katat, LkLB)
+
+            L_11 = self.L #+ jitter * jnp.eye(self.L.shape[0])
+            Q, R = qr(L_11)
+            L_21 = solve_triangular(R, Q.T @ kLZ).mT
+            L_12 = jnp.zeros_like(L_21.mT)
+            S = LkLZ - L_21 @ L_21.mT + jitter * jnp.eye(LkLZ.shape[0])
+            eigvals = jnp.linalg.eigvalsh(S)
+            print(eigvals.min())
+            L_22 = cholesky(S)
+            L_new = jnp.block([[L_11, L_12], [L_21, L_22]])
+            self.L = L_new
+
+            new_y = jnp.tile(y, (Katat.shape[0],1))
+            mLZ = jnp.kron(self.mean_function_A(A_test), functional(self.mean_function_B))
+            self.residual_list.append(new_y - mLZ)
+
+            kLBt = functional(lambda b_prime: self.kernel_B.cross_covariance(B_test, b_prime))
+            self.kLZt = jnp.kron(Katat, kLBt)
+
+        self.condition_using_test_points = condition_using_test_points
+        return self
+
 
     def predict(
         self,
@@ -361,33 +369,26 @@ class ConditionedSeparablePosterior():
 
         return GaussianDistribution(loc=jnp.atleast_1d(mean.squeeze()), scale=cov)
 
+    def __call__(
+        self,
+        test_inputs_A: Num[Array, "N D"],
+        test_inputs_B: Num[Array, "M E"],
+        *,
+        return_covariance_type: Literal["dense", "diagonal"] = "dense",
+    ) -> GaussianDistribution:
+        r"""Infer the posterior distribution at given inputs.
 
-    def condition_on_functional(self, functional, y, jitter=1e-1):
-        
-        def condition_using_test_points(Kata, Katat, A_test, B_test):
-            LkB = functional(lambda b: self.kernel_B.cross_covariance(b, self.B))        
-            LkLB = functional(lambda b: functional(lambda b_prime: self.kernel_B.cross_covariance(b, b_prime)))
-            LkZ = jnp.kron(Kata, LkB)
-            kLZ = LkZ.mT
-            LkLZ = jnp.kron(Katat, LkLB)
+        Args:
+            test_inputs_A: Where to infer on domain A.
+            test_inputs_B: Where to infer on domain B.
+            jitter (float): A small constant added to the diagonal of the
+                covariance matrix to ensure numerical stability.
 
-            L_11 = self.L #+ jitter * jnp.eye(self.L.shape[0])
-            Q, R = qr(L_11)
-            L_21 = solve_triangular(R, Q.T @ kLZ).mT
-            L_12 = jnp.zeros_like(L_21.mT)
-            S = LkLZ - L_21 @ L_21.mT + jitter * jnp.eye(LkLZ.shape[0])
-            eigvals = jnp.linalg.eigvalsh(S)
-            print(eigvals.min())
-            L_22 = cholesky(S)
-            L_new = jnp.block([[L_11, L_12], [L_21, L_22]])
-            self.L = L_new
-
-            new_y = jnp.tile(y, (Katat.shape[0],1))
-            mLZ = jnp.kron(self.mean_function_A(A_test), functional(self.mean_function_B))
-            self.residual_list.append(new_y - mLZ)
-
-            kLBt = functional(lambda b_prime: self.kernel_B.cross_covariance(B_test, b_prime))
-            self.kLZt = jnp.kron(Katat, kLBt)
-
-        self.condition_using_test_points = condition_using_test_points
-        return self
+        Returns:
+            Gaussian distribution over values at test_inputs.
+        """
+        return self.predict(
+        test_inputs_A,
+        test_inputs_B,
+        return_covariance_type=return_covariance_type,
+    )
