@@ -139,7 +139,9 @@ def separable_conjugate_mll(
     A, B, y = data.A, data.B, data.y
     mean = prior.full_mean(A, B)
     gram = prior.full_gram(A, B)
-    mll = GaussianDistribution(mean, gram)
+    noise = likelihood.noise_vector(data.n)
+    Sigma = gram + lx.DiagonalLinearOperator(noise)
+    mll = GaussianDistribution(mean, Sigma)
     return mll.log_prob(y.squeeze()).squeeze()
 
 
