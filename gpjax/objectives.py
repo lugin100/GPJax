@@ -16,8 +16,9 @@ from gpjax.gps import (
     ConjugatePosterior,
     NonConjugatePosterior,
 )
-from gpjax.separable_gps import SeparablePosterior
+from gpjax.separable_gps import SeparablePrior
 from gpjax.likelihoods import (
+    AbstractLikelihood,
     AbstractHeteroscedasticLikelihood,
 )
 from gpjax.linalg.utils import add_jitter
@@ -131,12 +132,13 @@ def conjugate_mll(posterior: ConjugatePosterior, data: Dataset) -> ScalarFloat:
 
 
 def separable_conjugate_mll(
-        posterior: SeparablePosterior,
+        prior: SeparablePrior,
+        likelihood: AbstractLikelihood,
         data: SeparableDataset
     ) -> ScalarFloat:
     A, B, y = data.A, data.B, data.y
-    mean = posterior.prior.full_mean(A, B)
-    gram = posterior.prior.full_gram(A, B)
+    mean = prior.full_mean(A, B)
+    gram = prior.full_gram(A, B)
     mll = GaussianDistribution(mean, gram)
     return mll.log_prob(y.squeeze()).squeeze()
 

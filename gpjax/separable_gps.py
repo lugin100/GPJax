@@ -185,7 +185,7 @@ class SeparablePrior(eqx.Module):
         return self.__mul__(other)
 
 
-class SeparablePosterior(eqx.Module, tp.Generic[P, L]):
+class SeparablePosterior(tp.Generic[P, L]):
     r"""Posterior to a separable GP prior with Gaussian likelihood."""
 
     prior: SeparablePrior
@@ -194,11 +194,18 @@ class SeparablePosterior(eqx.Module, tp.Generic[P, L]):
     mean_function_B: tp.Any
     kernel_A: tp.Any
     kernel_B: tp.Any
+    L: tp.Any
+    residual_list: tp.Any
+    K_test_condition_list: tp.Any
+    computations: tp.Any
+    A: tp.Any
+    B: tp.Any
 
     def __init__(
         self,
         prior: SeparablePrior,
         likelihood: G,
+
     ):
         r"""Construct a Gaussian process posterior.
 
@@ -212,45 +219,6 @@ class SeparablePosterior(eqx.Module, tp.Generic[P, L]):
         self.mean_function_B = prior.prior_B.mean_function
         self.kernel_A = prior.prior_A.kernel
         self.kernel_B = prior.prior_B.kernel
-
-    def cast(self):
-        return ConditionedSeparablePosterior(self)
-
-
-def _compute_Kronecker_Cholesky(A, B):
-    r"""Compute the Cholesky decomposition of a Kronecker product:
-    $$ A \otimes B = LL^T$$
-
-    Args:
-        A: Num[Array, '...']
-        B: Num[Array, '...']
-    Returns:
-        $L$
-    """
-    Lambda_A, U_A = jnp.linalg.eigh(A)
-    Lambda_B, U_B = jnp.linalg.eigh(B)
-    _, R_A = qr(jnp.diag(jnp.sqrt(Lambda_A)) @ U_A.mT)
-    _, R_B = qr(jnp.diag(jnp.sqrt(Lambda_B)) @ U_B.mT)
-    L = jnp.kron(R_A, R_B).mT
-    return L
-
-
-class ConditionedSeparablePosterior():
-    r"""A separable posterior conditioned on data and optionally linear functionals."""
-    prior: SeparablePrior
-    likelihood: tp.Any
-
-    def __init__(
-        self,
-        posterior: SeparablePosterior,
-        ):
-
-        self.prior = posterior.prior
-        self.likelihood = posterior.likelihood
-        self.mean_function_A = posterior.mean_function_A
-        self.mean_function_B = posterior.mean_function_B
-        self.kernel_A = posterior.kernel_A
-        self.kernel_B = posterior.kernel_B
 
         self.L = None
         self.residual_list = []
@@ -408,3 +376,21 @@ class ConditionedSeparablePosterior():
         test_inputs_B,
         return_covariance_type=return_covariance_type,
     )
+
+
+def _compute_Kronecker_Cholesky(A, B):
+    r"""Compute the Cholesky decomposition of a Kronecker product:
+    $$ A \otimes B = LL^T$$
+
+    Args:
+        A: Num[Array, '...']
+        B: Num[Array, '...']
+    Returns:
+        $L$
+    """
+    Lambda_A, U_A = jnp.linalg.eigh(A)
+    Lambda_B, U_B = jnp.linalg.eigh(B)
+    _, R_A = qr(jnp.diag(jnp.sqrt(Lambda_A)) @ U_A.mT)
+    _, R_B = qr(jnp.diag(jnp.sqrt(Lambda_B)) @ U_B.mT)
+    L = jnp.kron(R_A, R_B).mT
+    return L
