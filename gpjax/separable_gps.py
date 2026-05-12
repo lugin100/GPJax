@@ -248,16 +248,18 @@ class SeparablePosterior():
         #noise = self.likelihood.noise_vector(train_data.n)
 
         # Kernel computations
-        Kaa = self.kernel_A.gram(self.A).as_matrix()
-        Kbb = self.kernel_B.gram(self.B).as_matrix()
+        Kaa = _add_jitter(self.kernel_A.gram(self.A).as_matrix(), jitter)
+        Kbb = _add_jitter(self.kernel_B.gram(self.B).as_matrix(), jitter)
         Kata = self.kernel_A.cross_covariance(test_inputs_A, self.A)
         Kbtb = self.kernel_B.cross_covariance(test_inputs_B, self.B)
-        Katat = self.kernel_A.gram(test_inputs_A)
-        Kbtbt = self.kernel_B.gram(test_inputs_B)
+        Katat = _add_jitter(self.kernel_A.gram(test_inputs_A), jitter)
+        Kbtbt = _add_jitter(self.kernel_B.gram(test_inputs_B), jitter)
 
         # Intermediate values
         L_11 = _compute_Kronecker_Cholesky(Kaa, Kbb)
-        
+        L_11 = _add_jitter(L_11, jitter)
+        print("Cond(L11): ", jnp.linalg.cond(L_11))
+
         residual_data = self.y_data - jnp.kron(self.mean_function_A(self.A), self.mean_function_B(self.B))
         
         K_test_train = jnp.kron(Kata, Kbtb)
@@ -268,11 +270,12 @@ class SeparablePosterior():
         kLZ = jnp.kron(Kata, LkB).mT
         LkLZ = jnp.kron(Katat.as_matrix(), LkLB)
         L_21 = _stable_solve_triangular(L_11, kLZ).mT
+        print("Cond(L21): ", jnp.linalg.cond(L_21))
         S = LkLZ - L_21 @ L_21.mT
         S = _add_jitter(S, jitter)
         eigvals = jnp.linalg.eigvalsh(S)
-        print("Min Eigenval of S: ", eigvals.min())
         L_22 = cholesky(S)
+        print("Cond(L22): ", jnp.linalg.cond(L_22))
 
         new_y = jnp.tile(self.y_functional, (test_inputs_A.shape[0],1))
         mLZ = jnp.kron(self.mean_function_A(test_inputs_A), self.functional(self.mean_function_B))
@@ -358,8 +361,11 @@ def _solve_block_triangular(L11, L21, L22, b1, b2):
     # Block backward substitution
     x2 = solve_triangular(L22.mT, y2, lower=False)
     x1 = solve_triangular(L11.mT, y1 - L21.T @ x2, lower=False)
-    return jnp.concatenate([x1, x2], axis=0)
-
+    result = jnp.concatenate([x1, x2], axis=0)
+    b = jnp.concatenate((b1, b2))
+    L = jnp.block([[L11, jnp.zeros_like(L21.mT)], [L21, L22]])
+    print(jnp.linalg.norm(b - L @ L.mT @ result))
+    return result
 
 def _stable_solve_triangular(M, B, **kwargs):
     Q, R = qr(M)
