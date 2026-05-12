@@ -19,7 +19,6 @@ from gpjax.distributions import GaussianDistribution
 from gpjax.likelihoods import AbstractLikelihood, Gaussian
 from gpjax.gps import AbstractPrior, AbstractPosterior
 from gpjax.linalg.custom_operators import Kronecker
-from matplotlib import pyplot as plt
 
 L = tp.TypeVar("L", bound=AbstractLikelihood)
 G = tp.TypeVar("G", bound=Gaussian)
@@ -221,7 +220,9 @@ class SeparablePosterior(tp.Generic[P, L]):
         self.kernel_A = prior.prior_A.kernel
         self.kernel_B = prior.prior_B.kernel
 
-        self.L = None
+        self.L_11 = None
+        self.L_12 = None
+        self.L_22 = None
         self.residual_list = []
         self.K_test_condition_list = []
         self.computations = []
@@ -233,8 +234,8 @@ class SeparablePosterior(tp.Generic[P, L]):
         Args:
             train_data (SeparableDataset): Data to condition on.
         """
-        if self.L is not None:
-            raise ValueError("Must call condition_on_data before condition_on_functional")
+        if self.L_11 is not None:
+            raise ValueError("Can only condition on data once")
 
         self.A = train_data.A
         self.B = train_data.B
@@ -244,7 +245,7 @@ class SeparablePosterior(tp.Generic[P, L]):
             # Compute L
             Kaa = add_jitter(self.kernel_A.gram(self.A).as_matrix(), jitter)
             Kbb = add_jitter(self.kernel_B.gram(self.B).as_matrix(), jitter)
-            self.L = _compute_Kronecker_Cholesky(Kaa, Kbb)
+            self.L_11 = _compute_Kronecker_Cholesky(Kaa, Kbb)
 
             # Append residuals
             residual = train_data.y - jnp.kron(self.mean_function_A(self.A), self.mean_function_B(self.B))
@@ -269,16 +270,12 @@ class SeparablePosterior(tp.Generic[P, L]):
             LkLZ = jnp.kron(Katat, LkLB)
 
             # Update L
-            L_11 = self.L #+ jitter * jnp.eye(self.L.shape[0])
-            L_21 = stable_solve_triangular(L_11, kLZ).mT
-            L_12 = jnp.zeros_like(L_21.mT)
-            S = LkLZ - L_21 @ L_21.mT
+            self.L_21 = stable_solve_triangular(self.L_11, kLZ).mT
+            S = LkLZ - self.L_21 @ self.L_21.mT
             S = add_jitter(S, jitter)
             eigvals = jnp.linalg.eigvalsh(S)
             print("Min Eigenval of S: ", eigvals.min())
-            L_22 = cholesky(S)
-            L_new = jnp.block([[L_11, L_12], [L_21, L_22]])
-            self.L = L_new
+            self.L_22 = cholesky(S)
 
             # Append residuals
             new_y = jnp.tile(y, (A_test.shape[0],1))
@@ -325,10 +322,10 @@ class SeparablePosterior(tp.Generic[P, L]):
 
         # Evaluate lazy conditioning now
         [computation(Kata, Kbtb, Katat.as_matrix(), test_inputs_A, test_inputs_B) for computation in self.computations]
-        self.L = add_jitter(self.L, jitter)
-        print("cond(L): ", jnp.linalg.cond(self.L))
-        plt.imshow(self.L)
-        plt.colorbar()
+        L_12 = jnp.zeros_like(self.L_21.mT)
+        L = jnp.block([[self.L_11, L_12], [self.L_21, self.L_22]])
+        L = add_jitter(L, jitter)
+        print("cond(L): ", jnp.linalg.cond(L))
         K_test_conditions = jnp.concatenate(self.K_test_condition_list, axis=1)
         K_conditions_test = K_test_conditions.mT
 
@@ -336,8 +333,8 @@ class SeparablePosterior(tp.Generic[P, L]):
         prior_mean = jnp.kron(self.mean_function_A(test_inputs_A), self.mean_function_B(test_inputs_B)).squeeze()
 
         res = jnp.concatenate(self.residual_list, axis=0)
-        res = solve_triangular(self.L, res, lower=True)
-        res = solve_triangular(self.L, res, lower=True, trans="T")
+        res = solve_triangular(L, res, lower=True)
+        res = solve_triangular(L, res, lower=True, trans="T")
         res = K_test_conditions @ res
         mean = prior_mean[:,None] + res
         print("Mean has Nan: ", jnp.any(jnp.isnan(mean)))
@@ -345,8 +342,8 @@ class SeparablePosterior(tp.Generic[P, L]):
         prior_cov = Kronecker(Katat, Kbtbt)
 
         X = K_conditions_test
-        X = solve_triangular(self.L, X, lower=True)
-        X = solve_triangular(self.L, X, lower=True, trans="T")
+        X = solve_triangular(L, X, lower=True)
+        X = solve_triangular(L, X, lower=True, trans="T")
         X = K_test_conditions @ X
 
         X = lx.MatrixLinearOperator(X)
