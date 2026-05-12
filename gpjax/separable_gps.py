@@ -332,18 +332,16 @@ class SeparablePosterior(tp.Generic[P, L]):
         # Posterior mean
         prior_mean = jnp.kron(self.mean_function_A(test_inputs_A), self.mean_function_B(test_inputs_B)).squeeze()
 
-        res = jnp.concatenate(self.residual_list, axis=0)
-        res = solve_triangular(L, res, lower=True)
-        res = solve_triangular(L, res, lower=True, trans="T")
+        r1, r2 = self.residual_list
+        res = solve_block_triangular(self.L_11, self.L_21, self.L_22, r1, r2)
         res = K_test_conditions @ res
         mean = prior_mean[:,None] + res
         print("Mean has Nan: ", jnp.any(jnp.isnan(mean)))
         # Posterior covariance
         prior_cov = Kronecker(Katat, Kbtbt)
 
-        X = K_conditions_test
-        X = solve_triangular(L, X, lower=True)
-        X = solve_triangular(L, X, lower=True, trans="T")
+        K1, K2 = self.K_test_condition_list
+        X = solve_block_triangular(self.L_11, self.L_21, self.L_22, K1.mT, K2.mT)
         X = K_test_conditions @ X
 
         X = lx.MatrixLinearOperator(X)
@@ -393,6 +391,20 @@ def _compute_Kronecker_Cholesky(A, B):
     _, R_B = qr(jnp.diag(jnp.sqrt(Lambda_B)) @ U_B.mT)
     L = jnp.kron(R_A, R_B).mT
     return L
+
+
+def solve_block_triangular(L11, L21, L22, b1, b2):
+    r"""Compute $(L L^T)^{-1} b$ where 
+    $L$ is assumed to be a lower-triangular block matrix
+    $L = [[L11, 0], [L21, L22]]$ and b is a vector or matrix $[b1, b2]$.
+    """
+    # Block forward substitution
+    y1 = solve_triangular(L11, b1, lower=True)
+    y2 = solve_triangular(L22, b2 - L21 @ y1, lower=True)
+    # Block backward substitution
+    x2 = solve_triangular(L22.mT, y2, lower=False)
+    x1 = solve_triangular(L11.mT, y1 - L21.T @ x2, lower=False)
+    return jnp.concatenate([x1, x2], axis=0)
 
 
 def stable_solve_triangular(M, B, **kwargs):
