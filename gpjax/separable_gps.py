@@ -289,7 +289,7 @@ class ConditionedSeparablePosterior():
 
 
     def condition_on_functional(self, functional, y, jitter=1e-1):
-        if len(self.computations) is 0:
+        if len(self.computations) == 0:
             raise ValueError("Must call condition_on_functional after condition_on_data")
 
         def condition_using_test_points(Kata, Kbtb, Katat, A_test, B_test):
@@ -343,7 +343,7 @@ class ConditionedSeparablePosterior():
         Returns:
             Gaussian distribution over values at test_inputs.
         """
-        if len(self.computations) is 0:
+        if len(self.computations) == 0:
             raise ValueError("Cannot predict using an unconditioned posterior")
 
         #noise = self.likelihood.noise_vector(train_data.n)
