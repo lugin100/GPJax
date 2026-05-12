@@ -195,8 +195,6 @@ class SeparablePosterior(tp.Generic[P, L]):
     kernel_A: tp.Any
     kernel_B: tp.Any
     L: tp.Any
-    residual_list: tp.Any
-    K_test_condition_list: tp.Any
     computations: tp.Any
     A: tp.Any
     B: tp.Any
@@ -219,11 +217,6 @@ class SeparablePosterior(tp.Generic[P, L]):
         self.mean_function_B = prior.prior_B.mean_function
         self.kernel_A = prior.prior_A.kernel
         self.kernel_B = prior.prior_B.kernel
-
-        self.L_11 = None
-        self.L_12 = None
-        self.L_22 = None
-        self.residual_list = []
         self.computations = []
 
 
@@ -233,7 +226,7 @@ class SeparablePosterior(tp.Generic[P, L]):
         Args:
             train_data (SeparableDataset): Data to condition on.
         """
-        if self.L_11 is not None:
+        if hasattr(self, "L_11"):
             raise ValueError("Can only condition on data once")
 
         self.A = train_data.A
@@ -241,16 +234,15 @@ class SeparablePosterior(tp.Generic[P, L]):
 
         def condition_using_test_points(Kata, Kbtb, Katat, A_test, B_test):
 
-            # Compute L
+            # L
             Kaa = add_jitter(self.kernel_A.gram(self.A).as_matrix(), jitter)
             Kbb = add_jitter(self.kernel_B.gram(self.B).as_matrix(), jitter)
             self.L_11 = _compute_Kronecker_Cholesky(Kaa, Kbb)
 
-            # Append residuals
-            residual = train_data.y - jnp.kron(self.mean_function_A(self.A), self.mean_function_B(self.B))
-            self.residual_list.append(residual)
+            # Residual
+            self.residual_data = train_data.y - jnp.kron(self.mean_function_A(self.A), self.mean_function_B(self.B))
 
-            # Append K_test_conditions
+            # K_test_train
             self.K_test_train = jnp.kron(Kata, Kbtb)
             
 
@@ -268,7 +260,7 @@ class SeparablePosterior(tp.Generic[P, L]):
             kLZ = LkZ.mT
             LkLZ = jnp.kron(Katat, LkLB)
 
-            # Update L
+            # L
             self.L_21 = stable_solve_triangular(self.L_11, kLZ).mT
             S = LkLZ - self.L_21 @ self.L_21.mT
             S = add_jitter(S, jitter)
@@ -276,14 +268,14 @@ class SeparablePosterior(tp.Generic[P, L]):
             print("Min Eigenval of S: ", eigvals.min())
             self.L_22 = cholesky(S)
 
-            # Append residuals
+            # Residual
             new_y = jnp.tile(y, (A_test.shape[0],1))
             mLZ = jnp.kron(self.mean_function_A(A_test), functional(self.mean_function_B))
-            self.residual_list.append(new_y - mLZ)
+            self.residual_functional = new_y - mLZ
 
-            # Append K_test_conditions
+            # K_test_functional
             kLBt = functional(lambda b_prime: self.kernel_B.cross_covariance(B_test, b_prime))
-            self.K_test_condition = jnp.kron(Katat, kLBt)
+            self.K_test_functional = jnp.kron(Katat, kLBt)
             
 
         self.computations.append(condition_using_test_points)
@@ -325,13 +317,12 @@ class SeparablePosterior(tp.Generic[P, L]):
         L = jnp.block([[self.L_11, L_12], [self.L_21, self.L_22]])
         L = add_jitter(L, jitter)
         print("cond(L): ", jnp.linalg.cond(L))
-        K_test_conditions = jnp.concatenate((self.K_test_train,self.K_test_condition), axis=1)
+        K_test_conditions = jnp.concatenate((self.K_test_train,self.K_test_functional), axis=1)
 
         # Posterior mean
         prior_mean = jnp.kron(self.mean_function_A(test_inputs_A), self.mean_function_B(test_inputs_B)).squeeze()
 
-        r1, r2 = self.residual_list
-        res = solve_block_triangular(self.L_11, self.L_21, self.L_22, r1, r2)
+        res = solve_block_triangular(self.L_11, self.L_21, self.L_22, self.residual_data, self.residual_functional)
         res = K_test_conditions @ res
         mean = prior_mean[:,None] + res
         print("Mean has Nan: ", jnp.any(jnp.isnan(mean)))
@@ -340,7 +331,7 @@ class SeparablePosterior(tp.Generic[P, L]):
         prior_cov = Kronecker(Katat, Kbtbt)
 
         K1 = self.K_test_train.mT
-        K2 = self.K_test_condition.mT
+        K2 = self.K_test_functional.mT
         X = solve_block_triangular(self.L_11, self.L_21, self.L_22, K1, K2)
         X = K_test_conditions @ X
 
