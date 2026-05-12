@@ -185,19 +185,8 @@ class SeparablePrior(eqx.Module):
         return self.__mul__(other)
 
 
-class SeparablePosterior(tp.Generic[P, L]):
+class SeparablePosterior():
     r"""Posterior to a separable GP prior with Gaussian likelihood."""
-
-    prior: SeparablePrior
-    likelihood: tp.Any
-    mean_function_A: tp.Any
-    mean_function_B: tp.Any
-    kernel_A: tp.Any
-    kernel_B: tp.Any
-    L: tp.Any
-    computations: tp.Any
-    A: tp.Any
-    B: tp.Any
 
     def __init__(
         self,
@@ -218,6 +207,7 @@ class SeparablePosterior(tp.Generic[P, L]):
         self.kernel_A = prior.prior_A.kernel
         self.kernel_B = prior.prior_B.kernel
 
+
     def condition_on_data(self, train_data: SeparableDataset):
         r"""Condition the posterior on data.
 
@@ -226,16 +216,15 @@ class SeparablePosterior(tp.Generic[P, L]):
         """
         if hasattr(self, "A"):
             raise ValueError("Can only condition on data once")
-
         self.A = train_data.A
         self.B = train_data.B
         self.y_data = train_data.y
 
 
     def condition_on_functional(self, functional, y):
-
         self.functional = functional
         self.y_functional = y
+
 
     def predict(
         self,
@@ -256,55 +245,46 @@ class SeparablePosterior(tp.Generic[P, L]):
         Returns:
             Gaussian distribution over values at test_inputs.
         """
-
         #noise = self.likelihood.noise_vector(train_data.n)
 
         # Kernel computations
+        Kaa = self.kernel_A.gram(self.A).as_matrix()
+        Kbb = self.kernel_B.gram(self.B).as_matrix()
         Kata = self.kernel_A.cross_covariance(test_inputs_A, self.A)
         Kbtb = self.kernel_B.cross_covariance(test_inputs_B, self.B)
         Katat = self.kernel_A.gram(test_inputs_A)
         Kbtbt = self.kernel_B.gram(test_inputs_B)
 
-        # L
-        Kaa = add_jitter(self.kernel_A.gram(self.A).as_matrix(), jitter)
-        Kbb = add_jitter(self.kernel_B.gram(self.B).as_matrix(), jitter)
+        # Intermediate values
         L_11 = _compute_Kronecker_Cholesky(Kaa, Kbb)
-
-        # Residual
+        
         residual_data = self.y_data - jnp.kron(self.mean_function_A(self.A), self.mean_function_B(self.B))
-
-        # K_test_train
+        
         K_test_train = jnp.kron(Kata, Kbtb)
 
         LkB = self.functional(lambda b: self.kernel_B.cross_covariance(b, self.B))        
         LkLB = self.functional(lambda b: self.functional(lambda b_prime: self.kernel_B.cross_covariance(b, b_prime)))
-        LkZ = jnp.kron(Kata, LkB)
-        kLZ = LkZ.mT
+        kLBt = self.functional(lambda b_prime: self.kernel_B.cross_covariance(test_inputs_B, b_prime))
+        kLZ = jnp.kron(Kata, LkB).mT
         LkLZ = jnp.kron(Katat.as_matrix(), LkLB)
-
-        # L
-        L_21 = stable_solve_triangular(L_11, kLZ).mT
+        L_21 = _stable_solve_triangular(L_11, kLZ).mT
         S = LkLZ - L_21 @ L_21.mT
-        S = add_jitter(S, jitter)
+        S = _add_jitter(S, jitter)
         eigvals = jnp.linalg.eigvalsh(S)
         print("Min Eigenval of S: ", eigvals.min())
         L_22 = cholesky(S)
 
-        # Residual
         new_y = jnp.tile(self.y_functional, (test_inputs_A.shape[0],1))
         mLZ = jnp.kron(self.mean_function_A(test_inputs_A), self.functional(self.mean_function_B))
         residual_functional = new_y - mLZ
 
-        # K_test_functional
-        kLBt = self.functional(lambda b_prime: self.kernel_B.cross_covariance(test_inputs_B, b_prime))
         K_test_functional = jnp.kron(Katat.as_matrix(), kLBt)
-        
         K_test_conditions = jnp.concatenate((K_test_train, K_test_functional), axis=1)
 
         # Posterior mean
         prior_mean = jnp.kron(self.mean_function_A(test_inputs_A), self.mean_function_B(test_inputs_B)).squeeze()
 
-        res = solve_block_triangular(L_11, L_21, L_22, residual_data, residual_functional)
+        res = _solve_block_triangular(L_11, L_21, L_22, residual_data, residual_functional)
         res = K_test_conditions @ res
         mean = prior_mean[:,None] + res
         print("Mean has Nan: ", jnp.any(jnp.isnan(mean)))
@@ -312,7 +292,7 @@ class SeparablePosterior(tp.Generic[P, L]):
         # Posterior covariance
         prior_cov = Kronecker(Katat, Kbtbt)
 
-        X = solve_block_triangular(L_11, L_21, L_22, K_test_train.mT, K_test_functional.mT)
+        X = _solve_block_triangular(L_11, L_21, L_22, K_test_train.mT, K_test_functional.mT)
         X = K_test_conditions @ X
 
         X = lx.MatrixLinearOperator(X)
@@ -321,10 +301,12 @@ class SeparablePosterior(tp.Generic[P, L]):
 
         return GaussianDistribution(loc=jnp.atleast_1d(mean.squeeze()), scale=cov)
 
+
     def __call__(
         self,
         test_inputs_A: Num[Array, "N D"],
         test_inputs_B: Num[Array, "M E"],
+        jitter = 1e-6,
         *,
         return_covariance_type: Literal["dense", "diagonal"] = "dense",
     ) -> GaussianDistribution:
@@ -342,6 +324,7 @@ class SeparablePosterior(tp.Generic[P, L]):
         return self.predict(
         test_inputs_A,
         test_inputs_B,
+        jitter=jitter,
         return_covariance_type=return_covariance_type,
     )
 
@@ -364,7 +347,7 @@ def _compute_Kronecker_Cholesky(A, B):
     return L
 
 
-def solve_block_triangular(L11, L21, L22, b1, b2):
+def _solve_block_triangular(L11, L21, L22, b1, b2):
     r"""Compute $(L L^T)^{-1} b$ where 
     $L$ is assumed to be a lower-triangular block matrix
     $L = [[L11, 0], [L21, L22]]$ and b is a vector or matrix $[b1, b2]$.
@@ -378,12 +361,12 @@ def solve_block_triangular(L11, L21, L22, b1, b2):
     return jnp.concatenate([x1, x2], axis=0)
 
 
-def stable_solve_triangular(M, B, **kwargs):
+def _stable_solve_triangular(M, B, **kwargs):
     Q, R = qr(M)
     return solve_triangular(R, Q.T @ B, **kwargs)
 
 
-def add_jitter(op, jitter):
+def _add_jitter(op, jitter):
     if isinstance(op, Array):
         return op + jitter * jnp.eye(op.shape[0])
     if isinstance(op, lx.AbstractLinearOperator):
