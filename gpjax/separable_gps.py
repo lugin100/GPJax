@@ -244,15 +244,13 @@ class SeparablePosterior(tp.Generic[P, L]):
 
             # K_test_train
             self.K_test_train = jnp.kron(Kata, Kbtb)
-            
 
-        self.computations.append(condition_using_test_points)
+
+        self.computation1 = condition_using_test_points
 
 
     def condition_on_functional(self, functional, y, jitter=1e-6):
-        if len(self.computations) == 0:
-            raise ValueError("Must call condition_on_functional after condition_on_data")
-
+        
         def condition_using_test_points(Kata, Kbtb, Katat, A_test, B_test):
             LkB = functional(lambda b: self.kernel_B.cross_covariance(b, self.B))        
             LkLB = functional(lambda b: functional(lambda b_prime: self.kernel_B.cross_covariance(b, b_prime)))
@@ -278,7 +276,7 @@ class SeparablePosterior(tp.Generic[P, L]):
             self.K_test_functional = jnp.kron(Katat, kLBt)
             
 
-        self.computations.append(condition_using_test_points)
+        self.computation2 = condition_using_test_points
 
 
     def predict(
@@ -300,8 +298,6 @@ class SeparablePosterior(tp.Generic[P, L]):
         Returns:
             Gaussian distribution over values at test_inputs.
         """
-        if len(self.computations) == 0:
-            raise ValueError("Cannot predict using an unconditioned posterior")
 
         #noise = self.likelihood.noise_vector(train_data.n)
 
@@ -312,11 +308,9 @@ class SeparablePosterior(tp.Generic[P, L]):
         Kbtbt = self.kernel_B.gram(test_inputs_B)
 
         # Evaluate lazy conditioning now
-        [computation(Kata, Kbtb, Katat.as_matrix(), test_inputs_A, test_inputs_B) for computation in self.computations]
-        L_12 = jnp.zeros_like(self.L_21.mT)
-        L = jnp.block([[self.L_11, L_12], [self.L_21, self.L_22]])
-        L = add_jitter(L, jitter)
-        print("cond(L): ", jnp.linalg.cond(L))
+        self.computation1(Kata, Kbtb, Katat.as_matrix(), test_inputs_A, test_inputs_B)
+        self.computation2(Kata, Kbtb, Katat.as_matrix(), test_inputs_A, test_inputs_B)
+
         K_test_conditions = jnp.concatenate((self.K_test_train,self.K_test_functional), axis=1)
 
         # Posterior mean
