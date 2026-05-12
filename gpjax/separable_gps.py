@@ -224,7 +224,6 @@ class SeparablePosterior(tp.Generic[P, L]):
         self.L_12 = None
         self.L_22 = None
         self.residual_list = []
-        self.K_test_condition_list = []
         self.computations = []
 
 
@@ -252,8 +251,8 @@ class SeparablePosterior(tp.Generic[P, L]):
             self.residual_list.append(residual)
 
             # Append K_test_conditions
-            K_test_train = jnp.kron(Kata, Kbtb)
-            self.K_test_condition_list.append(K_test_train)
+            self.K_test_train = jnp.kron(Kata, Kbtb)
+            
 
         self.computations.append(condition_using_test_points)
 
@@ -284,8 +283,8 @@ class SeparablePosterior(tp.Generic[P, L]):
 
             # Append K_test_conditions
             kLBt = functional(lambda b_prime: self.kernel_B.cross_covariance(B_test, b_prime))
-            kLZt = jnp.kron(Katat, kLBt)
-            self.K_test_condition_list.append(kLZt)
+            self.K_test_condition = jnp.kron(Katat, kLBt)
+            
 
         self.computations.append(condition_using_test_points)
 
@@ -326,8 +325,7 @@ class SeparablePosterior(tp.Generic[P, L]):
         L = jnp.block([[self.L_11, L_12], [self.L_21, self.L_22]])
         L = add_jitter(L, jitter)
         print("cond(L): ", jnp.linalg.cond(L))
-        K_test_conditions = jnp.concatenate(self.K_test_condition_list, axis=1)
-        K_conditions_test = K_test_conditions.mT
+        K_test_conditions = jnp.concatenate((self.K_test_train,self.K_test_condition), axis=1)
 
         # Posterior mean
         prior_mean = jnp.kron(self.mean_function_A(test_inputs_A), self.mean_function_B(test_inputs_B)).squeeze()
@@ -337,11 +335,13 @@ class SeparablePosterior(tp.Generic[P, L]):
         res = K_test_conditions @ res
         mean = prior_mean[:,None] + res
         print("Mean has Nan: ", jnp.any(jnp.isnan(mean)))
+        
         # Posterior covariance
         prior_cov = Kronecker(Katat, Kbtbt)
 
-        K1, K2 = self.K_test_condition_list
-        X = solve_block_triangular(self.L_11, self.L_21, self.L_22, K1.mT, K2.mT)
+        K1 = self.K_test_train.mT
+        K2 = self.K_test_condition.mT
+        X = solve_block_triangular(self.L_11, self.L_21, self.L_22, K1, K2)
         X = K_test_conditions @ X
 
         X = lx.MatrixLinearOperator(X)
