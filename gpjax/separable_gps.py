@@ -19,6 +19,7 @@ from gpjax.distributions import GaussianDistribution
 from gpjax.likelihoods import AbstractLikelihood, Gaussian
 from gpjax.gps import AbstractPrior, AbstractPosterior
 from gpjax.linalg.custom_operators import Kronecker
+from matplotlib import pyplot as plt
 
 L = tp.TypeVar("L", bound=AbstractLikelihood)
 G = tp.TypeVar("G", bound=Gaussian)
@@ -226,7 +227,7 @@ class SeparablePosterior(tp.Generic[P, L]):
         self.computations = []
 
 
-    def condition_on_data(self, train_data: SeparableDataset):
+    def condition_on_data(self, train_data: SeparableDataset, jitter=1e-6):
         r"""Condition the posterior on data.
 
         Args:
@@ -241,8 +242,8 @@ class SeparablePosterior(tp.Generic[P, L]):
         def condition_using_test_points(Kata, Kbtb, Katat, A_test, B_test):
 
             # Compute L
-            Kaa = self.kernel_A.gram(self.A).as_matrix()
-            Kbb = self.kernel_B.gram(self.B).as_matrix()
+            Kaa = add_jitter(self.kernel_A.gram(self.A).as_matrix(), jitter)
+            Kbb = add_jitter(self.kernel_B.gram(self.B).as_matrix(), jitter)
             self.L = _compute_Kronecker_Cholesky(Kaa, Kbb)
 
             # Append residuals
@@ -256,7 +257,7 @@ class SeparablePosterior(tp.Generic[P, L]):
         self.computations.append(condition_using_test_points)
 
 
-    def condition_on_functional(self, functional, y, jitter=1e-1):
+    def condition_on_functional(self, functional, y, jitter=1e-6):
         if len(self.computations) == 0:
             raise ValueError("Must call condition_on_functional after condition_on_data")
 
@@ -269,12 +270,12 @@ class SeparablePosterior(tp.Generic[P, L]):
 
             # Update L
             L_11 = self.L #+ jitter * jnp.eye(self.L.shape[0])
-            Q, R = qr(L_11)
-            L_21 = solve_triangular(R, Q.T @ kLZ).mT
+            L_21 = stable_solve_triangular(L_11, kLZ).mT
             L_12 = jnp.zeros_like(L_21.mT)
-            S = LkLZ - L_21 @ L_21.mT + jitter * jnp.eye(LkLZ.shape[0])
+            S = LkLZ - L_21 @ L_21.mT
+            S = add_jitter(S, jitter)
             eigvals = jnp.linalg.eigvalsh(S)
-            print(eigvals.min())
+            print("Min Eigenval of S: ", eigvals.min())
             L_22 = cholesky(S)
             L_new = jnp.block([[L_11, L_12], [L_21, L_22]])
             self.L = L_new
@@ -296,7 +297,7 @@ class SeparablePosterior(tp.Generic[P, L]):
         self,
         test_inputs_A: Num[Array, "N D"],
         test_inputs_B: Num[Array, "M E"],
-        jitter = 1e-4,
+        jitter = 1e-6,
         *,
         return_covariance_type: Literal["dense", "diagonal"] = "dense",
     ) -> GaussianDistribution:
@@ -324,8 +325,10 @@ class SeparablePosterior(tp.Generic[P, L]):
 
         # Evaluate lazy conditioning now
         [computation(Kata, Kbtb, Katat.as_matrix(), test_inputs_A, test_inputs_B) for computation in self.computations]
-
-
+        self.L = add_jitter(self.L, jitter)
+        print("cond(L): ", jnp.linalg.cond(self.L))
+        plt.imshow(self.L)
+        plt.colorbar()
         K_test_conditions = jnp.concatenate(self.K_test_condition_list, axis=1)
         K_conditions_test = K_test_conditions.mT
 
@@ -337,7 +340,7 @@ class SeparablePosterior(tp.Generic[P, L]):
         res = solve_triangular(self.L, res, lower=True, trans="T")
         res = K_test_conditions @ res
         mean = prior_mean[:,None] + res
-
+        print("Mean has Nan: ", jnp.any(jnp.isnan(mean)))
         # Posterior covariance
         prior_cov = Kronecker(Katat, Kbtbt)
 
@@ -347,9 +350,8 @@ class SeparablePosterior(tp.Generic[P, L]):
         X = K_test_conditions @ X
 
         X = lx.MatrixLinearOperator(X)
-        jitterOperator = jitter * lx.IdentityLinearOperator(X.in_structure())
-        cov = prior_cov - X + jitterOperator
-        print(cov.as_matrix().min())
+        cov = prior_cov - X
+        print("Min covariance value: ", cov.as_matrix().min())
 
         return GaussianDistribution(loc=jnp.atleast_1d(mean.squeeze()), scale=cov)
 
@@ -394,3 +396,17 @@ def _compute_Kronecker_Cholesky(A, B):
     _, R_B = qr(jnp.diag(jnp.sqrt(Lambda_B)) @ U_B.mT)
     L = jnp.kron(R_A, R_B).mT
     return L
+
+
+def stable_solve_triangular(M, B, **kwargs):
+    Q, R = qr(M)
+    return solve_triangular(R, Q.T @ B, **kwargs)
+
+
+def add_jitter(op, jitter):
+    if isinstance(op, Array):
+        return op + jitter * jnp.eye(op.shape[0])
+    if isinstance(op, lx.AbstractLinearOperator):
+        return op + jitter * lx.IdentityLinearOperator(op.in_structure())
+    else:
+        raise ValueError
