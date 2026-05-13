@@ -217,7 +217,7 @@ class SeparablePosterior():
         Args:
             train_data (SeparableDataset): Data to condition on.
         """
-        if conditioned_on_data:
+        if self.conditioned_on_data:
             raise ValueError("Can only condition on data once")
         self.A = train_data.A
         self.B = train_data.B
@@ -250,6 +250,8 @@ class SeparablePosterior():
         Returns:
             Gaussian distribution over values at test_inputs.
         """
+        if not self.conditioned_on_data:
+            raise ValueError("Can not predict on posterior that has not been conditioned on data. Use prior.predict() instead.")
         #noise = self.likelihood.noise_vector(train_data.n)
 
         # Kernel computations
