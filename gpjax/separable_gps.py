@@ -240,8 +240,6 @@ class SeparablePosterior():
                 return result
             self.functional = new_functional
 
-            print(jnp.block(self.functional(lambda b_prime: self.functional(lambda b: self.kernel_B.cross_covariance(b_prime, b)))).shape)
-
 
     def predict(
         self,
@@ -299,9 +297,6 @@ class SeparablePosterior():
             kLB = jnp.block(self.functional(lambda b_prime: self.kernel_B.cross_covariance(self.B, b_prime)))
             LkLB = jnp.block(self.functional(lambda b: self.functional(lambda b_prime: self.kernel_B.cross_covariance(b, b_prime))))
             kLBt = jnp.block(self.functional(lambda b_prime: self.kernel_B.cross_covariance(test_inputs_B, b_prime)))
-            print(kLB.shape)
-            print(LkLB.shape)
-            print(kLBt.shape)
             kLZ = jnp.kron(Kata.mT, kLB)
             LkLZ = jnp.kron(Katat.as_matrix(), LkLB)
             L_21 = _stable_solve_triangular(L_11, kLZ).mT
@@ -393,7 +388,7 @@ def _solve_block_triangular(L11, L21, L22, b1, b2):
     result = jnp.concatenate([x1, x2], axis=0)
     b = jnp.concatenate((b1, b2))
     L = jnp.block([[L11, jnp.zeros_like(L21.mT)], [L21, L22]])
-    print(jnp.linalg.norm(b - L @ L.mT @ result))
+    print("Maximal result deviation: ", (b - L @ L.mT @ result).max())
     return result
 
 def _stable_solve_triangular(M, B, **kwargs):
