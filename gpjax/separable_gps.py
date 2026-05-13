@@ -222,7 +222,7 @@ class SeparablePosterior():
         self.A = train_data.A
         self.B = train_data.B
         self.y_data = train_data.y
-        self.conditioned_ond_data = True
+        self.conditioned_on_data = True
 
 
     def condition_on_functional(self, functional, y):
@@ -271,40 +271,48 @@ class SeparablePosterior():
         
         K_test_train = jnp.kron(Kata, Kbtb)
 
-        LkB = self.functional(lambda b: self.kernel_B.cross_covariance(b, self.B))        
-        LkLB = self.functional(lambda b: self.functional(lambda b_prime: self.kernel_B.cross_covariance(b, b_prime)))
-        kLBt = self.functional(lambda b_prime: self.kernel_B.cross_covariance(test_inputs_B, b_prime))
-        kLZ = jnp.kron(Kata, LkB).mT
-        LkLZ = jnp.kron(Katat.as_matrix(), LkLB)
-        L_21 = _stable_solve_triangular(L_11, kLZ).mT
-        print("Cond(L21): ", jnp.linalg.cond(L_21))
-        S = LkLZ - L_21 @ L_21.mT
-        S = _add_jitter(S, jitter)
-        eigvals = jnp.linalg.eigvalsh(S)
-        L_22 = cholesky(S)
-        print("Cond(L22): ", jnp.linalg.cond(L_22))
-
-        new_y = jnp.tile(self.y_functional, (test_inputs_A.shape[0],1))
-        mLZ = jnp.kron(self.mean_function_A(test_inputs_A), self.functional(self.mean_function_B))
-        residual_functional = new_y - mLZ
-
-        K_test_functional = jnp.kron(Katat.as_matrix(), kLBt)
-        K_test_conditions = jnp.concatenate((K_test_train, K_test_functional), axis=1)
-
-        # Posterior mean
         prior_mean = jnp.kron(self.mean_function_A(test_inputs_A), self.mean_function_B(test_inputs_B)).squeeze()
+        prior_cov = Kronecker(Katat, Kbtbt)
 
-        res = _solve_block_triangular(L_11, L_21, L_22, residual_data, residual_functional)
-        res = K_test_conditions @ res
+        if not self.conditioned_on_functional:
+            res = solve_triangular(L_11, residual_data, lower=True)
+            res = solve_triangular(L_11, res, lower=True, trans="T")
+            res = K_test_train @ res
+
+            X = solve_triangular(L_11, K_test_train.mT, lower=True)
+            X = solve_triangular(L_11, X, lower=True, trans="T")
+            X = K_test_train @ X
+
+        else:
+            LkB = self.functional(lambda b: self.kernel_B.cross_covariance(b, self.B))        
+            LkLB = self.functional(lambda b: self.functional(lambda b_prime: self.kernel_B.cross_covariance(b, b_prime)))
+            kLBt = self.functional(lambda b_prime: self.kernel_B.cross_covariance(test_inputs_B, b_prime))
+            kLZ = jnp.kron(Kata, LkB).mT
+            LkLZ = jnp.kron(Katat.as_matrix(), LkLB)
+            L_21 = _stable_solve_triangular(L_11, kLZ).mT
+            print("Cond(L21): ", jnp.linalg.cond(L_21))
+            S = LkLZ - L_21 @ L_21.mT
+            S = _add_jitter(S, jitter)
+            eigvals = jnp.linalg.eigvalsh(S)
+            L_22 = cholesky(S)
+            print("Cond(L22): ", jnp.linalg.cond(L_22))
+
+            new_y = jnp.tile(self.y_functional, (test_inputs_A.shape[0],1))
+            mLZ = jnp.kron(self.mean_function_A(test_inputs_A), self.functional(self.mean_function_B))
+            residual_functional = new_y - mLZ
+
+            K_test_functional = jnp.kron(Katat.as_matrix(), kLBt)
+            K_test_conditions = jnp.concatenate((K_test_train, K_test_functional), axis=1)
+
+            res = _solve_block_triangular(L_11, L_21, L_22, residual_data, residual_functional)
+            res = K_test_conditions @ res
+
+            X = _solve_block_triangular(L_11, L_21, L_22, K_test_train.mT, K_test_functional.mT)
+            X = K_test_conditions @ X
+
         mean = prior_mean[:,None] + res
         print("Mean has Nan: ", jnp.any(jnp.isnan(mean)))
         
-        # Posterior covariance
-        prior_cov = Kronecker(Katat, Kbtbt)
-
-        X = _solve_block_triangular(L_11, L_21, L_22, K_test_train.mT, K_test_functional.mT)
-        X = K_test_conditions @ X
-
         X = lx.MatrixLinearOperator(X)
         cov = prior_cov - X
         print("Min covariance value: ", cov.as_matrix().min())
