@@ -228,13 +228,16 @@ class SeparablePosterior():
     def condition_on_functional(self, functional, y):
         if not self.conditioned_on_functional:
             self.y_functional = y
-            self.functional = functional
+            self.functional = lambda x: [functional(x)]
             self.conditioned_on_functional = True
         else:
             self.y_functional = jnp.concatenate((self.y_functional, y))
 
             old_functional = self.functional
-            new_functional = lambda x: [old_functional(x), functional(x)]
+            def new_functional(x):
+                result = old_functional(x)
+                result.append(functional(x))
+                return result
             self.functional = new_functional
 
             print(jnp.block(self.functional(lambda b_prime: self.functional(lambda b: self.kernel_B.cross_covariance(b_prime, b)))).shape)
@@ -277,7 +280,7 @@ class SeparablePosterior():
         print("Cond(L11): ", jnp.linalg.cond(L_11))
 
         residual_data = self.y_data - jnp.kron(self.mean_function_A(self.A), self.mean_function_B(self.B))
-        
+
         K_test_train = jnp.kron(Kata, Kbtb)
 
         prior_mean = jnp.kron(self.mean_function_A(test_inputs_A), self.mean_function_B(test_inputs_B)).squeeze()
@@ -312,7 +315,6 @@ class SeparablePosterior():
             new_y = jnp.tile(self.y_functional, (test_inputs_A.shape[0],1))
             mLZ = jnp.kron(self.mean_function_A(test_inputs_A), jnp.concatenate(self.functional(self.mean_function_B)))
             residual_functional = new_y - mLZ
-            #print("residual_functional", residual_functional)
             K_test_functional = jnp.kron(Katat.as_matrix(), kLBt)
             K_test_conditions = jnp.concatenate((K_test_train, K_test_functional), axis=1)
 
