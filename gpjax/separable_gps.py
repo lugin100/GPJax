@@ -206,6 +206,9 @@ class SeparablePosterior():
         self.mean_function_B = prior.prior_B.mean_function
         self.kernel_A = prior.prior_A.kernel
         self.kernel_B = prior.prior_B.kernel
+        self.conditioned_on_data = False
+        self.conditioned_on_functional = False
+
 
 
     def condition_on_data(self, train_data: SeparableDataset):
@@ -214,16 +217,18 @@ class SeparablePosterior():
         Args:
             train_data (SeparableDataset): Data to condition on.
         """
-        if hasattr(self, "A"):
+        if conditioned_on_data:
             raise ValueError("Can only condition on data once")
         self.A = train_data.A
         self.B = train_data.B
         self.y_data = train_data.y
+        self.conditioned_ond_data = True
 
 
     def condition_on_functional(self, functional, y):
         self.functional = functional
         self.y_functional = y
+        self.conditioned_on_functional = True
 
 
     def predict(
