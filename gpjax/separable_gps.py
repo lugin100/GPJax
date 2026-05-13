@@ -226,9 +226,18 @@ class SeparablePosterior():
 
 
     def condition_on_functional(self, functional, y):
-        self.functional = functional
-        self.y_functional = y
-        self.conditioned_on_functional = True
+        if not self.conditioned_on_functional:
+            self.y_functional = y
+            self.functional = functional
+            self.conditioned_on_functional = True
+        else:
+            self.y_functional = jnp.concatenate((self.y_functional, y))
+
+            old_functional = self.functional
+            new_functional = lambda x: [old_functional(x), functional(x)]
+            self.functional = new_functional
+
+            print(jnp.block(self.functional(lambda b_prime: self.functional(lambda b: self.kernel_B.cross_covariance(b_prime, b)))).shape)
 
 
     def predict(
@@ -284,10 +293,13 @@ class SeparablePosterior():
             X = K_test_train @ X
 
         else:
-            LkB = self.functional(lambda b: self.kernel_B.cross_covariance(b, self.B))        
-            LkLB = self.functional(lambda b: self.functional(lambda b_prime: self.kernel_B.cross_covariance(b, b_prime)))
-            kLBt = self.functional(lambda b_prime: self.kernel_B.cross_covariance(test_inputs_B, b_prime))
-            kLZ = jnp.kron(Kata, LkB).mT
+            kLB = jnp.block(self.functional(lambda b_prime: self.kernel_B.cross_covariance(self.B, b_prime)))
+            LkLB = jnp.block(self.functional(lambda b: self.functional(lambda b_prime: self.kernel_B.cross_covariance(b, b_prime))))
+            kLBt = jnp.block(self.functional(lambda b_prime: self.kernel_B.cross_covariance(test_inputs_B, b_prime)))
+            print(kLB.shape)
+            print(LkLB.shape)
+            print(kLBt.shape)
+            kLZ = jnp.kron(Kata.mT, kLB)
             LkLZ = jnp.kron(Katat.as_matrix(), LkLB)
             L_21 = _stable_solve_triangular(L_11, kLZ).mT
             print("Cond(L21): ", jnp.linalg.cond(L_21))
@@ -298,9 +310,9 @@ class SeparablePosterior():
             print("Cond(L22): ", jnp.linalg.cond(L_22))
 
             new_y = jnp.tile(self.y_functional, (test_inputs_A.shape[0],1))
-            mLZ = jnp.kron(self.mean_function_A(test_inputs_A), self.functional(self.mean_function_B))
+            mLZ = jnp.kron(self.mean_function_A(test_inputs_A), jnp.concatenate(self.functional(self.mean_function_B)))
             residual_functional = new_y - mLZ
-
+            #print("residual_functional", residual_functional)
             K_test_functional = jnp.kron(Katat.as_matrix(), kLBt)
             K_test_conditions = jnp.concatenate((K_test_train, K_test_functional), axis=1)
 
