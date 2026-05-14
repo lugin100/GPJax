@@ -211,7 +211,7 @@ class SeparablePosterior():
 
 
 
-    def condition_on_data(self, train_data: SeparableDataset):
+    def condition_on_data(self, train_data: SeparableDataset, jitter=1e-6):
         r"""Condition the posterior on data.
 
         Args:
@@ -222,6 +222,12 @@ class SeparablePosterior():
         self.A = train_data.A
         self.B = train_data.B
         self.y_data = train_data.y
+        self.Kaa = _add_jitter(self.kernel_A.gram(self.A).as_matrix(), jitter)
+        self.Kbb = _add_jitter(self.kernel_B.gram(self.B).as_matrix(), jitter)
+        self.L_11 = _add_jitter(_compute_Kronecker_Cholesky(self.Kaa, self.Kbb), jitter)
+        print("Cond(L11): ", jnp.linalg.cond(self.L_11))
+        self.residual_data = self.y_data - jnp.kron(self.mean_function_A(self.A), self.mean_function_B(self.B))
+
         self.conditioned_on_data = True
 
 
@@ -265,19 +271,10 @@ class SeparablePosterior():
         #noise = self.likelihood.noise_vector(train_data.n)
 
         # Kernel computations
-        Kaa = _add_jitter(self.kernel_A.gram(self.A).as_matrix(), jitter)
-        Kbb = _add_jitter(self.kernel_B.gram(self.B).as_matrix(), jitter)
         Kata = self.kernel_A.cross_covariance(test_inputs_A, self.A)
         Kbtb = self.kernel_B.cross_covariance(test_inputs_B, self.B)
         Katat = _add_jitter(self.kernel_A.gram(test_inputs_A), jitter)
         Kbtbt = _add_jitter(self.kernel_B.gram(test_inputs_B), jitter)
-
-        # Intermediate values
-        L_11 = _compute_Kronecker_Cholesky(Kaa, Kbb)
-        L_11 = _add_jitter(L_11, jitter)
-        print("Cond(L11): ", jnp.linalg.cond(L_11))
-
-        residual_data = self.y_data - jnp.kron(self.mean_function_A(self.A), self.mean_function_B(self.B))
 
         K_test_train = jnp.kron(Kata, Kbtb)
 
@@ -285,21 +282,21 @@ class SeparablePosterior():
         prior_cov = Kronecker(Katat, Kbtbt)
 
         if not self.conditioned_on_functional:
-            res = solve_triangular(L_11, residual_data, lower=True)
-            res = solve_triangular(L_11, res, lower=True, trans="T")
+            res = solve_triangular(self.L_11, self.residual_data, lower=True)
+            res = solve_triangular(self.L_11, res, lower=True, trans="T")
             res = K_test_train @ res
 
-            X = solve_triangular(L_11, K_test_train.mT, lower=True)
-            X = solve_triangular(L_11, X, lower=True, trans="T")
+            X = solve_triangular(self.L_11, K_test_train.mT, lower=True)
+            X = solve_triangular(self.L_11, X, lower=True, trans="T")
             X = K_test_train @ X
 
         else:
             kLB = jnp.block(self.functional(lambda b_prime: self.kernel_B.cross_covariance(self.B, b_prime)))
             LkLB = jnp.block(self.functional(lambda b: self.functional(lambda b_prime: self.kernel_B.cross_covariance(b, b_prime))))
             kLBt = jnp.block(self.functional(lambda b_prime: self.kernel_B.cross_covariance(test_inputs_B, b_prime)))
-            kLZ = jnp.kron(Kata.mT, kLB)
+            kLZ = jnp.kron(Kata.mT, self.kLB)
             LkLZ = jnp.kron(Katat.as_matrix(), LkLB)
-            L_21 = _stable_solve_triangular(L_11, kLZ).mT
+            L_21 = _stable_solve_triangular(self.L_11, kLZ).mT
             print("Cond(L21): ", jnp.linalg.cond(L_21))
             S = LkLZ - L_21 @ L_21.mT
             S = _add_jitter(S, jitter)
@@ -313,15 +310,15 @@ class SeparablePosterior():
             K_test_functional = jnp.kron(Katat.as_matrix(), kLBt)
             K_test_conditions = jnp.concatenate((K_test_train, K_test_functional), axis=1)
 
-            res = _solve_block_triangular(L_11, L_21, L_22, residual_data, residual_functional)
+            res = _solve_block_triangular(self.L_11, L_21, L_22, residual_data, residual_functional)
             res = K_test_conditions @ res
 
-            X = _solve_block_triangular(L_11, L_21, L_22, K_test_train.mT, K_test_functional.mT)
+            X = _solve_block_triangular(self.L_11, L_21, L_22, K_test_train.mT, K_test_functional.mT)
             X = K_test_conditions @ X
 
         mean = prior_mean[:,None] + res
         print("Mean has Nan: ", jnp.any(jnp.isnan(mean)))
-        
+
         X = lx.MatrixLinearOperator(X)
         cov = prior_cov - X
         print("Min covariance value: ", cov.as_matrix().min())
