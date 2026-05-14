@@ -234,18 +234,14 @@ class SeparablePosterior():
     def condition_on_functional(self, functional, y):
         if not self.conditioned_on_functional:
             self.y_functional = y
-            self.functional = lambda x: [functional(x)]
+            self.functional = functional
             self.conditioned_on_functional = True
         else:
             self.y_functional = jnp.concatenate((self.y_functional, y))
-
             old_functional = self.functional
             def new_functional(x):
-                result = old_functional(x)
-                result.append(functional(x))
-                return result
+                return jnp.concatenate((old_functional(x), functional(x)))
             self.functional = new_functional
-
 
     def predict(
         self,
@@ -291,10 +287,12 @@ class SeparablePosterior():
             X = K_test_train @ X
 
         else:
-            kLB = jnp.block(self.functional(lambda b_prime: self.kernel_B.cross_covariance(self.B, b_prime)))
-            LkLB = jnp.block(self.functional(lambda b: self.functional(lambda b_prime: self.kernel_B.cross_covariance(b, b_prime))))
-            kLBt = jnp.block(self.functional(lambda b_prime: self.kernel_B.cross_covariance(test_inputs_B, b_prime)))
-            kLZ = jnp.kron(Kata.mT, self.kLB)
+            kL = lambda b: self.functional(lambda b_prime: self.kernel_B(b, b_prime))
+            kLB = jax.vmap(kL)(self.B)
+            kL_i = lambda i, x: kL(x)[i]
+            LkLB = jax.vmap(lambda i: self.functional(lambda x: kL_i(i,x)))(jnp.arange(self.y_functional.shape[0]))
+            kLBt = jax.vmap(kL)(test_inputs_B)
+            kLZ = jnp.kron(Kata.mT, kLB)
             LkLZ = jnp.kron(Katat.as_matrix(), LkLB)
             L_21 = _stable_solve_triangular(self.L_11, kLZ).mT
             print("Cond(L21): ", jnp.linalg.cond(L_21))
