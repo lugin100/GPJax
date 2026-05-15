@@ -232,6 +232,13 @@ class SeparablePosterior():
 
 
     def condition_on_functional(self, functional, y):
+        r"""Condition the posterior on a linear functional: $L[u] = y$.
+
+        Args:
+            functional (Callable): A callable mapping 
+                a PDE solution function $u: \mathbb{R}^d \mapsto \mathbb{R}$ to a vector in $\mathbb{R}^l$.
+            y: A vector in $\mathbb{R}^l 
+        """
         if not self.conditioned_on_functional:
             self.y_functional = y
             self.functional = functional
@@ -251,7 +258,8 @@ class SeparablePosterior():
         *,
         return_covariance_type: Literal["dense", "diagonal"] = "dense",
     ) -> GaussianDistribution:
-        r"""Infer the posterior distribution at given inputs.
+        r"""Infer the posterior distribution at given inputs,
+            taking all previous conditionings into account.
 
         Args:
             test_inputs_A: Where to infer on domain A.
@@ -334,7 +342,8 @@ class SeparablePosterior():
         *,
         return_covariance_type: Literal["dense", "diagonal"] = "dense",
     ) -> GaussianDistribution:
-        r"""Infer the posterior distribution at given inputs.
+        r"""Infer the posterior distribution at given inputs,
+            taking all previous conditionings into account.
 
         Args:
             test_inputs_A: Where to infer on domain A.
