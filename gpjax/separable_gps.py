@@ -289,26 +289,28 @@ class SeparablePosterior():
         else:
             kL = lambda b: self.functional(lambda b_prime: self.kernel_B(b, b_prime))
             kLB = jax.vmap(kL)(self.B)
-            kL_i = lambda i, x: kL(x)[i]
-            LkLB = jax.vmap(lambda i: self.functional(lambda x: kL_i(i,x)))(jnp.arange(self.y_functional.shape[0]))
+            LkL = jax.vmap(lambda i: self.functional(lambda x: kL(x)[i]))(jnp.arange(self.y_functional.shape[0]))
+            eigvals = jnp.linalg.eigvalsh(LkL)
+            print("Min eig of LkL: ", eigvals.min())
             kLBt = jax.vmap(kL)(test_inputs_B)
             kLZ = jnp.kron(Kata.mT, kLB)
-            LkLZ = jnp.kron(Katat.as_matrix(), LkLB)
+            LkLZ = jnp.kron(Katat.as_matrix(), LkL)
             L_21 = _stable_solve_triangular(self.L_11, kLZ).mT
             print("Cond(L21): ", jnp.linalg.cond(L_21))
             S = LkLZ - L_21 @ L_21.mT
             S = _add_jitter(S, jitter)
             eigvals = jnp.linalg.eigvalsh(S)
+            print("Min eig of S: ", eigvals.min())
             L_22 = cholesky(S)
             print("Cond(L22): ", jnp.linalg.cond(L_22))
 
-            new_y = jnp.tile(self.y_functional, (test_inputs_A.shape[0],1))
-            mLZ = jnp.kron(self.mean_function_A(test_inputs_A), jnp.concatenate(self.functional(self.mean_function_B)))
+            new_y = jnp.kron(jnp.ones((test_inputs_A.shape[0],1)), self.y_functional)
+            mLZ = jnp.kron(self.mean_function_A(test_inputs_A), self.functional(lambda x: self.mean_function_B(jnp.atleast_2d(x)).squeeze())[:,None])
             residual_functional = new_y - mLZ
             K_test_functional = jnp.kron(Katat.as_matrix(), kLBt)
             K_test_conditions = jnp.concatenate((K_test_train, K_test_functional), axis=1)
 
-            res = _solve_block_triangular(self.L_11, L_21, L_22, residual_data, residual_functional)
+            res = _solve_block_triangular(self.L_11, L_21, L_22, self.residual_data, residual_functional)
             res = K_test_conditions @ res
 
             X = _solve_block_triangular(self.L_11, L_21, L_22, K_test_train.mT, K_test_functional.mT)
@@ -372,7 +374,7 @@ def _compute_Kronecker_Cholesky(A, B):
 def _solve_block_triangular(L11, L21, L22, b1, b2):
     r"""Compute $(L L^T)^{-1} b$ where 
     $L$ is assumed to be a lower-triangular block matrix
-    $L = [[L11, 0], [L21, L22]]$ and b is a vector or matrix $[b1, b2]$.
+    $L = [[L11, 0], [L21, L22]]$ and b is a vector or matrix $[[b1, b2]]$.
     """
     # Block forward substitution
     y1 = solve_triangular(L11, b1, lower=True)
