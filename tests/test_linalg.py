@@ -66,6 +66,8 @@ def test_add_jitter():
 def test_add_jitter_non_square_raises():
     with pytest.raises(ValueError, match="square"):
         add_jitter(jnp.ones((2, 3)))
+    with pytest.raises(ValueError, match="structure"):
+        add_jitter(lx.MatrixLinearOperator(jnp.ones((2, 3))))
 
 
 def test_add_jitter_non_2d_raises():
