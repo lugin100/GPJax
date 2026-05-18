@@ -72,6 +72,11 @@ def test_add_jitter_non_2d_raises():
     with pytest.raises(ValueError, match="2D"):
         add_jitter(jnp.ones((2,)))
 
+def test_add_jitter_operator():
+    op = lx.MatrixLinearOperator(jnp.eye(3))
+    result = add_jitter(op, 0.1)
+    assert jnp.allclose(jnp.diag(result.as_matrix()), 1.1)
+
 
 # --- BlockDiag tests ---
 
