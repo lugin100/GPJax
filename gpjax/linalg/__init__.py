@@ -2,6 +2,7 @@
 
 from gpjax.linalg.custom_operators import BlockDiag, Kronecker
 from gpjax.linalg.utils import add_jitter, cholesky_factor, logdet
+from gpjax.linalg.computations import compute_Kronecker_Cholesky
 
 __all__ = [
     "BlockDiag",
@@ -9,4 +10,5 @@ __all__ = [
     "add_jitter",
     "cholesky_factor",
     "logdet",
+    "compute_Kronecker_Cholesky"
 ]

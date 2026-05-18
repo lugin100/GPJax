@@ -18,7 +18,7 @@ import lineax as lx
 from gpjax.distributions import GaussianDistribution
 from gpjax.likelihoods import AbstractLikelihood, Gaussian
 from gpjax.gps import AbstractPrior, AbstractPosterior
-from gpjax.linalg import add_jitter
+from gpjax.linalg import add_jitter, compute_Kronecker_Cholesky
 from gpjax.linalg.custom_operators import Kronecker
 
 L = tp.TypeVar("L", bound=AbstractLikelihood)
@@ -225,7 +225,7 @@ class SeparablePosterior():
         self.y_data = train_data.y
         self.Kaa = add_jitter(self.kernel_A.gram(self.A).as_matrix(), jitter)
         self.Kbb = add_jitter(self.kernel_B.gram(self.B).as_matrix(), jitter)
-        self.L_11 = add_jitter(_compute_Kronecker_Cholesky(self.Kaa, self.Kbb), jitter)
+        self.L_11 = add_jitter(compute_Kronecker_Cholesky(self.Kaa, self.Kbb), jitter)
         print("Cond(L11): ", jnp.linalg.cond(self.L_11))
         self.residual_data = self.y_data - jnp.kron(self.mean_function_A(self.A), self.mean_function_B(self.B))
 
@@ -361,24 +361,6 @@ class SeparablePosterior():
         jitter=jitter,
         return_covariance_type=return_covariance_type,
     )
-
-
-def _compute_Kronecker_Cholesky(A, B):
-    r"""Compute the Cholesky decomposition of a Kronecker product:
-    $$ A \otimes B = LL^T$$
-
-    Args:
-        A: Num[Array, '...']
-        B: Num[Array, '...']
-    Returns:
-        $L$
-    """
-    Lambda_A, U_A = jnp.linalg.eigh(A)
-    Lambda_B, U_B = jnp.linalg.eigh(B)
-    _, R_A = qr(jnp.diag(jnp.sqrt(Lambda_A)) @ U_A.mT)
-    _, R_B = qr(jnp.diag(jnp.sqrt(Lambda_B)) @ U_B.mT)
-    L = jnp.kron(R_A, R_B).mT
-    return L
 
 
 def _solve_block_triangular(L11, L21, L22, b1, b2):

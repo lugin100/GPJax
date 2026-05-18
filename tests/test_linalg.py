@@ -1,6 +1,6 @@
 """Tests for the Lineax-based linear algebra module."""
 
-from gpjax.linalg import add_jitter, cholesky_factor, logdet
+from gpjax.linalg import add_jitter, cholesky_factor, logdet, compute_Kronecker_Cholesky
 from gpjax.linalg.custom_operators import BlockDiag, Kronecker
 import jax
 import jax.numpy as jnp
@@ -176,7 +176,7 @@ def test_Kronecker_Cholesky_is_tril():
     L = compute_Kronecker_Cholesky(A, B)
     jnp.allclose(L, jnp.tril(L))
 
-    
+
 def test_Kronecker_Cholesky_computation():
     truth = jnp.kron(A, B)
 
