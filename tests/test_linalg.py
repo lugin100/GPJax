@@ -1,6 +1,12 @@
 """Tests for the Lineax-based linear algebra module."""
 
-from gpjax.linalg import add_jitter, cholesky_factor, logdet, compute_Kronecker_Cholesky
+from gpjax.linalg import (
+    add_jitter,
+    cholesky_factor,
+    logdet,
+    compute_Kronecker_Cholesky,
+    solve_block_triangular
+    )
 from gpjax.linalg.custom_operators import BlockDiag, Kronecker
 import jax
 import jax.numpy as jnp
@@ -184,6 +190,49 @@ def test_Kronecker_Cholesky_computation():
     test = L @ L.T
 
     jnp.allclose(truth, test)
+
+
+# --- Block triangular solve tests ---
+
+def reference_solution(L11, L21, L22, b1, b2):
+    """Reference solve using the dense block matrix."""
+    n1 = L11.shape[0]
+    n2 = L22.shape[0]
+
+    L12 = jnp.zeros_like(L21.mT)
+
+    L = jnp.block([[L11, L12], [L21, L22]])
+    b = jnp.concatenate([b1, b2], axis=0)
+
+    return jnp.linalg.solve(L @ L.T, b)
+
+
+def test_solve_block_triangular_vector_rhs():
+    L11 = jnp.array([[2.0, 0.0], [1.0, 3.0]])
+    L21 = jnp.array([[4.0, 1.0]])
+    L22 = jnp.array([[5.0]])
+    b1 = jnp.array([1.0, 2.0])
+    b2 = jnp.array([3.0])
+    expected = reference_solution(L11, L21, L22, b1, b2)
+
+    result = solve_block_triangular(L11, L21, L22, b1, b2)
+
+    assert result.shape == expected.shape
+    assert jnp.allclose(result, expected)
+
+
+def test_solve_block_triangular_matrix_rhs():
+    L11 = jnp.array([[3.0, 0.0],[2.0, 4.0]])
+    L21 = jnp.array([[1.0, -1.0],[0.5, 2.0]])
+    L22 = jnp.array([[2.0, 0.0],[1.0, 3.0]])
+    b1 = jnp.array([[1.0, 2.0],[3.0, 4.0]])
+    b2 = jnp.array([[5.0, 6.0],[7.0, 8.0]])
+    expected = reference_solution(L11, L21, L22, b1, b2)
+
+    result = solve_block_triangular(L11, L21, L22, b1, b2)
+
+    assert result.shape == expected.shape
+    assert jnp.allclose(result, expected)
 
 
 # --- Deprecated wrappers ---
