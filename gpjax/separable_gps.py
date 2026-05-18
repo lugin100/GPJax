@@ -18,6 +18,7 @@ import lineax as lx
 from gpjax.distributions import GaussianDistribution
 from gpjax.likelihoods import AbstractLikelihood, Gaussian
 from gpjax.gps import AbstractPrior, AbstractPosterior
+from gpjax.linalg import add_jitter
 from gpjax.linalg.custom_operators import Kronecker
 
 L = tp.TypeVar("L", bound=AbstractLikelihood)
@@ -222,9 +223,9 @@ class SeparablePosterior():
         self.A = train_data.A
         self.B = train_data.B
         self.y_data = train_data.y
-        self.Kaa = _add_jitter(self.kernel_A.gram(self.A).as_matrix(), jitter)
-        self.Kbb = _add_jitter(self.kernel_B.gram(self.B).as_matrix(), jitter)
-        self.L_11 = _add_jitter(_compute_Kronecker_Cholesky(self.Kaa, self.Kbb), jitter)
+        self.Kaa = add_jitter(self.kernel_A.gram(self.A).as_matrix(), jitter)
+        self.Kbb = add_jitter(self.kernel_B.gram(self.B).as_matrix(), jitter)
+        self.L_11 = add_jitter(_compute_Kronecker_Cholesky(self.Kaa, self.Kbb), jitter)
         print("Cond(L11): ", jnp.linalg.cond(self.L_11))
         self.residual_data = self.y_data - jnp.kron(self.mean_function_A(self.A), self.mean_function_B(self.B))
 
@@ -277,8 +278,8 @@ class SeparablePosterior():
         # Kernel computations
         Kata = self.kernel_A.cross_covariance(test_inputs_A, self.A)
         Kbtb = self.kernel_B.cross_covariance(test_inputs_B, self.B)
-        Katat = _add_jitter(self.kernel_A.gram(test_inputs_A), jitter)
-        Kbtbt = _add_jitter(self.kernel_B.gram(test_inputs_B), jitter)
+        Katat = add_jitter(self.kernel_A.gram(test_inputs_A), jitter)
+        Kbtbt = add_jitter(self.kernel_B.gram(test_inputs_B), jitter)
 
         K_test_train = jnp.kron(Kata, Kbtb)
 
@@ -306,7 +307,7 @@ class SeparablePosterior():
             L_21 = _stable_solve_triangular(self.L_11, kLZ).mT
             print("Cond(L21): ", jnp.linalg.cond(L_21))
             S = LkLZ - L_21 @ L_21.mT
-            S = _add_jitter(S, jitter)
+            S = add_jitter(S, jitter)
             eigvals = jnp.linalg.eigvalsh(S)
             print("Min eig of S: ", eigvals.min())
             L_22 = cholesky(S)
@@ -401,11 +402,3 @@ def _stable_solve_triangular(M, B, **kwargs):
     Q, R = qr(M)
     return solve_triangular(R, Q.T @ B, **kwargs)
 
-
-def _add_jitter(op, jitter):
-    if isinstance(op, Array):
-        return op + jitter * jnp.eye(op.shape[0])
-    if isinstance(op, lx.AbstractLinearOperator):
-        return op + jitter * lx.IdentityLinearOperator(op.in_structure())
-    else:
-        raise ValueError
