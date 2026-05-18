@@ -10,13 +10,16 @@ import lineax as lx
 from gpjax.linalg.custom_operators import BlockDiag, Kronecker
 
 
-def add_jitter(matrix: Array, jitter: float | Array = 1e-6) -> Array:
-    """Add jitter to the diagonal of a matrix for numerical stability."""
-    if matrix.ndim != 2:
-        raise ValueError(f"Expected 2D matrix, got {matrix.ndim}D array")
-    if matrix.shape[0] != matrix.shape[1]:
-        raise ValueError(f"Expected square matrix, got shape {matrix.shape}")
-    return matrix + jnp.eye(matrix.shape[0]) * jitter
+def add_jitter(matrix: Array | lx.AbstractLinearOperator, jitter: float | Array = 1e-6) -> Array | lx.AbstractLinearOperator:
+    """Add jitter to the diagonal of a matrix or operator for numerical stability."""
+    if isinstance(matrix, Array):
+        if matrix.ndim != 2:
+            raise ValueError(f"Expected 2D matrix, got {matrix.ndim}D array")
+        if matrix.shape[0] != matrix.shape[1]:
+            raise ValueError(f"Expected square matrix, got shape {matrix.shape}")
+        return matrix + jnp.eye(matrix.shape[0]) * jitter
+    if isinstance(matrix, lx.AbstractLinearOperator):
+        return matrix + jitter * lx.IdentityLinearOperator(matrix.in_structure())
 
 
 @functools.singledispatch
