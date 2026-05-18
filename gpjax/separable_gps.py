@@ -222,14 +222,17 @@ class SeparablePosterior():
             raise ValueError("Can only condition on data once")
         self.A = train_data.A
         self.B = train_data.B
-        self.y_data = train_data.y
         self.Kaa = add_jitter(self.kernel_A.gram(self.A).as_matrix(), jitter)
         self.Kbb = add_jitter(self.kernel_B.gram(self.B).as_matrix(), jitter)
         self.L_11 = add_jitter(compute_Kronecker_Cholesky(self.Kaa, self.Kbb), jitter)
-        print("Cond(L11): ", jnp.linalg.cond(self.L_11))
-        self.residual_data = self.y_data - jnp.kron(self.mean_function_A(self.A), self.mean_function_B(self.B))
-
+        self.residual_data = self.compute_data_residual(train_data)
         self.conditioned_on_data = True
+
+
+    def compute_data_residual(self, train_data):
+        r"""Diffrence between training targets and prior mean evaluated at training points."""
+        prior_pred = jnp.kron(self.mean_function_A(train_data.A), self.mean_function_B(train_data.B))
+        return train_data.y - prior_pred
 
 
     def condition_on_functional(self, functional, y):
