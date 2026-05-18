@@ -151,6 +151,41 @@ def test_kronecker_structures():
     assert kron.out_structure().shape == (6,)
 
 
+# --- Kronecker Cholesky tests ---
+
+# Two symmetric psd matrices
+A = jnp.array([
+        [4.0, 1.0],
+        [1.0, 3.0],
+    ])
+B = jnp.array([
+        [2.0, 0.5],
+        [0.5, 1.5],
+    ])
+
+def test_Kronecker_Cholesky_shape():
+    A = jnp.eye(2)
+    B = jnp.eye(3)
+
+    L = compute_Kronecker_Cholesky(A, B)
+
+    assert L.shape == (6, 6)
+
+
+def test_Kronecker_Cholesky_is_tril():
+    L = compute_Kronecker_Cholesky(A, B)
+    jnp.allclose(L, jnp.tril(L))
+
+    
+def test_Kronecker_Cholesky_computation():
+    truth = jnp.kron(A, B)
+
+    L = compute_Kronecker_Cholesky(A, B)
+    test = L @ L.T
+
+    jnp.allclose(truth, test)
+
+
 # --- Deprecated wrappers ---
 
 
