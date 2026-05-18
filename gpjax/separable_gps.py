@@ -18,7 +18,7 @@ import lineax as lx
 from gpjax.distributions import GaussianDistribution
 from gpjax.likelihoods import AbstractLikelihood, Gaussian
 from gpjax.gps import AbstractPrior, AbstractPosterior
-from gpjax.linalg import add_jitter, compute_Kronecker_Cholesky
+from gpjax.linalg import add_jitter, compute_Kronecker_Cholesky, solve_block_triangular
 from gpjax.linalg.custom_operators import Kronecker
 
 L = tp.TypeVar("L", bound=AbstractLikelihood)
@@ -319,10 +319,10 @@ class SeparablePosterior():
             K_test_functional = jnp.kron(Katat.as_matrix(), kLBt)
             K_test_conditions = jnp.concatenate((K_test_train, K_test_functional), axis=1)
 
-            res = _solve_block_triangular(self.L_11, L_21, L_22, self.residual_data, residual_functional)
+            res = solve_block_triangular(self.L_11, L_21, L_22, self.residual_data, residual_functional)
             res = K_test_conditions @ res
 
-            X = _solve_block_triangular(self.L_11, L_21, L_22, K_test_train.mT, K_test_functional.mT)
+            X = solve_block_triangular(self.L_11, L_21, L_22, K_test_train.mT, K_test_functional.mT)
             X = K_test_conditions @ X
 
         mean = prior_mean[:,None] + res
@@ -362,23 +362,6 @@ class SeparablePosterior():
         return_covariance_type=return_covariance_type,
     )
 
-
-def _solve_block_triangular(L11, L21, L22, b1, b2):
-    r"""Compute $(L L^T)^{-1} b$ where 
-    $L$ is assumed to be a lower-triangular block matrix
-    $L = [[L11, 0], [L21, L22]]$ and b is a vector or matrix $[[b1, b2]]$.
-    """
-    # Block forward substitution
-    y1 = solve_triangular(L11, b1, lower=True)
-    y2 = solve_triangular(L22, b2 - L21 @ y1, lower=True)
-    # Block backward substitution
-    x2 = solve_triangular(L22.mT, y2, lower=False)
-    x1 = solve_triangular(L11.mT, y1 - L21.T @ x2, lower=False)
-    result = jnp.concatenate([x1, x2], axis=0)
-    b = jnp.concatenate((b1, b2))
-    L = jnp.block([[L11, jnp.zeros_like(L21.mT)], [L21, L22]])
-    print("Maximal result deviation: ", (b - L @ L.mT @ result).max())
-    return result
 
 def _stable_solve_triangular(M, B, **kwargs):
     Q, R = qr(M)
