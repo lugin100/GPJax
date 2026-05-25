@@ -39,6 +39,7 @@ class Matern32(StationaryKernel):
 
     name: str = "Matérn32"
 
+    @jax.custom_jvp
     def __call__(
         self,
         x: Float[Array, " D"],
@@ -53,6 +54,25 @@ class Matern32(StationaryKernel):
             * jnp.exp(-jnp.sqrt(3.0) * tau)
         )
         return K.squeeze()
+
+    @__call__.defjvp
+    def jvp(primals, tangents):
+        x, y = primals
+        x_dot, y_dot = tangents
+        primal_out = self(x, y)
+        x = self.slice_input(x) / _val(self.lengthscale)
+        y = self.slice_input(y) / _val(self.lengthscale)
+        tau = euclidean_distance(x, y)
+        dk_dr = -3.0 * _val(self.variance)
+            * tau * jnp.exp(-jnp.sqrt(3.0) * tau)
+        dr_dx = (x - y) / (tau * _val(self.lengthscale))
+        dr_dy = -dr_dx
+
+        tangent_out = (
+        jnp.dot(dr_dx, x_dot),
+        jnp.dot(dr_dy, y_dot)
+    )
+        return primal_out, tangent_out
 
     @property
     def spectral_density(self) -> npd.StudentT:

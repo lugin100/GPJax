@@ -215,3 +215,9 @@ def test_cross_covariance(test_init: StationaryKernel, n_a: int, n_b: int):
     Kxy = k.cross_covariance(x, y)
     assert isinstance(Kxy, jax.Array)
     assert Kxy.shape == (n_a, n_b)
+
+def test_analytic_gradient_Matern32():
+    kernel = Matern32(active_dims=[0, 1])
+
+    autograd = jax.grad(kernel)
+    print(autograd)
