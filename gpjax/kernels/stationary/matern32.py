@@ -13,6 +13,7 @@
 # limitations under the License.
 # ==============================================================================
 
+import jax
 import jax.numpy as jnp
 from jaxtyping import Float
 import numpyro.distributions as npd
@@ -33,47 +34,66 @@ class Matern32(StationaryKernel):
     lengthscale parameter $\ell$ and variance $\sigma^2$.
 
     $$
-    k(x, y) = \sigma^2 \exp \Bigg(1+ \frac{\sqrt{3}\lvert x-y \rvert}{\ell} \ \Bigg)\exp\Bigg(-\frac{\sqrt{3}\lvert x-y\rvert}{\ell^2} \Bigg)
+    k(x, y) = \sigma^2 \exp \Bigg(1+ \frac{\sqrt{3}\lvert x-y \rvert}{\ell} \ \Bigg)\exp\Bigg(-\frac{\sqrt{3}\lvert x-y\rvert}{\ell} \Bigg)
     $$
     """
 
     name: str = "Matérn32"
 
-    @jax.custom_jvp
     def __call__(
         self,
         x: Float[Array, " D"],
         y: Float[Array, " D"],
     ) -> Float[Array, ""]:
-        x = self.slice_input(x) / _val(self.lengthscale)
-        y = self.slice_input(y) / _val(self.lengthscale)
-        tau = euclidean_distance(x, y)
-        K = (
-            _val(self.variance)
-            * (1.0 + jnp.sqrt(3.0) * tau)
-            * jnp.exp(-jnp.sqrt(3.0) * tau)
-        )
-        return K.squeeze()
+        return matern32_kernel(
+            self.slice_input(x),
+            self.slice_input(y),
+            _val(self.lengthscale),
+            _val(self.variance))
 
-    @__call__.defjvp
-    def jvp(primals, tangents):
-        x, y = primals
-        x_dot, y_dot = tangents
-        primal_out = self(x, y)
-        x = self.slice_input(x) / _val(self.lengthscale)
-        y = self.slice_input(y) / _val(self.lengthscale)
-        tau = euclidean_distance(x, y)
-        dk_dr = -3.0 * _val(self.variance)
-            * tau * jnp.exp(-jnp.sqrt(3.0) * tau)
-        dr_dx = (x - y) / (tau * _val(self.lengthscale))
-        dr_dy = -dr_dx
-
-        tangent_out = (
-        jnp.dot(dr_dx, x_dot),
-        jnp.dot(dr_dy, y_dot)
+#@jax.custom_jvp
+def matern32_kernel(x, y, lengthscale, variance):
+    x = x / lengthscale
+    y = y / lengthscale
+    tau = euclidean_distance(x, y)
+    K = (
+        variance
+        * (1.0 + jnp.sqrt(3.0) * tau)
+        * jnp.exp(-jnp.sqrt(3.0) * tau)
     )
-        return primal_out, tangent_out
+    return K.squeeze()
+
+"""
+@matern32_kernel.defjvp
+def jvp(primals, tangents):
+    x, y, lengthscale, variance = primals
+    x_dot, y_dot, l_dot, v_dot = tangents
+    primal_out = matern32_kernel(x, y, lengthscale, variance)
+
+    diff = x - y
+
+    # SAFE norm for primal only
+    r = jnp.linalg.norm(diff)
+    eps = 1e-10
+    r = jnp.maximum(r, eps)
+    tau = r / lengthscale
+
+
+    dk_dx = -3.0 * variance * jnp.exp(-jnp.sqrt(3.0) * tau) * (x - y) / lengthscale
+    dk_dy = -dk_dx
+
+    dk_dv = (1.0 + jnp.sqrt(3.0) * tau) * jnp.exp(-jnp.sqrt(3.0) * tau)
+    dk_dl = 3.0 * variance * jnp.exp(-jnp.sqrt(3.0) * tau) * tau**2 / lengthscale
+
+    tangent_out = (
+        jnp.dot(dk_dx, x_dot)
+         + jnp.dot(dk_dy, y_dot)
+         + dk_dl * l_dot
+         + dk_dv * v_dot
+        )
+    return primal_out, tangent_out
 
     @property
     def spectral_density(self) -> npd.StudentT:
         return build_student_t_distribution(nu=3)
+"""
