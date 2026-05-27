@@ -16,9 +16,10 @@
 
 import abc
 import functools as ft
-
+from typing import Callable
 import beartype.typing as tp
 import equinox as eqx
+import jax
 import jax.numpy as jnp
 from jaxtyping import (
     Float,
@@ -30,6 +31,8 @@ from gpjax.typing import (
     Array,
     ScalarFloat,
 )
+from jax.scipy.linalg import cho_solve
+
 
 
 def _val(x):
@@ -218,6 +221,49 @@ class ProductMeanFunction(CombinationMeanFunction):
         super().__init__(means=means, operator=ft.partial(jnp.prod, axis=0))
 
 
+class ConditionedMean(AbstractMeanFunction):
+    r"""Conditioned mean function.
+
+    Args:
+        prior_mean: AbstractMeanFunction
+        L: (lower) Cholesky of the kernel Gram on the training data
+        residual: Difference between data and prior mean prediction
+        kX_train: function mapping kernel input x to k(x, X_train)
+    """
+    prior_mean: AbstractMeanFunction
+    kX_train: Callable
+    representer_weight: Array
+
+    def __init__(
+        self,
+        prior_mean: AbstractMeanFunction,
+        L: Array,
+        residual: Array,
+        kX_train: Callable,
+    ):
+
+        self.prior_mean = prior_mean
+        self.kX_train = kX_train
+        # Precompute representer weights
+        self.representer_weight = cho_solve((L, True), residual)
+        super().__init__()
+
+    def __call__(self, x: Num[Array, "N D"]) -> Float[Array, "N O"]:
+        r"""Evaluate the mean function at the given points.
+
+        Args:
+            x (Float[Array, " D"]): The point at which to evaluate the mean function.
+
+        Returns:
+            Float[Array, "1"]: The evaluated mean function:
+            $$ \text{mean}(x) = \text{prior_mean}(x) + \text{kX_train}(x) L^{-T} L^{-1} \text{residual} $$ 
+        """
+        x = jnp.atleast_2d(x)
+        prior_mean = self.prior_mean(x)
+        k_xXtrain = self.kX_train(x)
+        return prior_mean + k_xXtrain @ self.representer_weight
+
+
 __all__ = [
     "AbstractMeanFunction",
     "CombinationMeanFunction",
@@ -225,4 +271,5 @@ __all__ = [
     "ProductMeanFunction",
     "SumMeanFunction",
     "Zero",
+    "ConditionedMean",
 ]
