@@ -313,7 +313,7 @@ class SeparablePosterior():
             S = add_jitter(S, jitter)
             eigvals = jnp.linalg.eigvalsh(S)
             print("Min eig of S: ", eigvals.min())
-            L_22 = cholesky(S)
+            L_22 = cholesky(S, lower=True)
             print("Cond(L22): ", jnp.linalg.cond(L_22))
 
             new_y = jnp.kron(jnp.ones((test_inputs_A.shape[0],1)), self.y_functional)
