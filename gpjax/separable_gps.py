@@ -3,18 +3,16 @@ from typing import Literal
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-from jax.scipy.linalg import (
-    qr,
-    solve_triangular,
-    cholesky
-)
+from jax.scipy.linalg import cholesky, cho_solve
 from jaxtyping import (
     Float,
     Num,
 )
+import lineax as lx
 from gpjax.typing import Array
 from gpjax.dataset import SeparableDataset
-import lineax as lx
+from gpjax.mean_functions import ConditionedMean
+from gpjax.kernels import ConditionedKernel
 from gpjax.distributions import GaussianDistribution
 from gpjax.likelihoods import AbstractLikelihood, Gaussian
 from gpjax.gps import AbstractPrior, AbstractPosterior
@@ -222,17 +220,11 @@ class SeparablePosterior():
             raise ValueError("Can only condition on data once")
         self.A = train_data.A
         self.B = train_data.B
+        self.y = train_data.y
         self.Kaa = add_jitter(self.kernel_A.gram(self.A).as_matrix(), jitter)
-        self.Kbb = add_jitter(self.kernel_B.gram(self.B).as_matrix(), jitter)
-        self.L_11 = add_jitter(compute_Kronecker_Cholesky(self.Kaa, self.Kbb), jitter)
-        self.residual_data = self.compute_data_residual(train_data)
+        #self.L_A = cholesky(self.Kaa)
+        #self.L_B = cholesky(self.Kbb)
         self.conditioned_on_data = True
-
-
-    def compute_data_residual(self, train_data):
-        r"""Diffrence between training targets and prior mean evaluated at training points."""
-        prior_pred = jnp.kron(self.mean_function_A(train_data.A), self.mean_function_B(train_data.B))
-        return train_data.y - prior_pred
 
 
     def condition_on_functional(self, functional, y):
@@ -243,16 +235,24 @@ class SeparablePosterior():
                 a PDE solution function $u: \mathbb{R}^d \mapsto \mathbb{R}$ to a vector in $\mathbb{R}^l$.
             y: A vector in $\mathbb{R}^l 
         """
-        if not self.conditioned_on_functional:
-            self.y_functional = y
-            self.functional = functional
-            self.conditioned_on_functional = True
-        else:
-            self.y_functional = jnp.concatenate((self.y_functional, y))
-            old_functional = self.functional
-            def new_functional(x):
-                return jnp.concatenate((old_functional(x), functional(x)))
-            self.functional = new_functional
+        old_mean = self.mean_function_B
+        old_kernel = self.kernel_B
+        kL = lambda b: functional(lambda b_prime: old_kernel(b, b_prime))
+        LkL = jax.vmap(lambda i: functional(lambda x: kL(x)[i]))(jnp.arange(y.shape[0]))
+        #LkL = functional(lambda b: functional(lambda b_prime: old_kernel(b, b_prime)))
+        L_L = cholesky(LkL, lower=True)
+
+        # GPJax defines mean functions as NxD -> Nx1, whereas functional expects D -> 1
+        Lm = functional(lambda x: old_mean(jnp.atleast_2d(x)).squeeze(-1))
+        residual = y - Lm
+        self.mean_function_B = ConditionedMean(old_mean, L_L, residual, kL)
+        self.kernel_B = ConditionedKernel(old_kernel, L_L, kL)
+
+    def compute_data_residual(self):
+        r"""Difference between training targets and mean evaluated at training points."""
+        pred = jnp.kron(self.mean_function_A(self.A), self.mean_function_B(self.B))
+        return self.y - pred
+
 
     def predict(
         self,
@@ -277,62 +277,30 @@ class SeparablePosterior():
         if not self.conditioned_on_data:
             raise ValueError("Can not predict on posterior that has not been conditioned on data. Use prior.predict() instead.")
         #noise = self.likelihood.noise_vector(train_data.n)
+        prior_mean = jnp.kron(self.mean_function_A(test_inputs_A), self.mean_function_B(test_inputs_B))
+
+        self.Kbb = add_jitter(self.kernel_B.gram(self.B).as_matrix(), jitter)
+        L = compute_Kronecker_Cholesky(self.Kaa, self.Kbb)
 
         # Kernel computations
         Kata = self.kernel_A.cross_covariance(test_inputs_A, self.A)
         Kbtb = self.kernel_B.cross_covariance(test_inputs_B, self.B)
-        Katat = add_jitter(self.kernel_A.gram(test_inputs_A), jitter)
-        Kbtbt = add_jitter(self.kernel_B.gram(test_inputs_B), jitter)
-
         K_test_train = jnp.kron(Kata, Kbtb)
 
-        prior_mean = jnp.kron(self.mean_function_A(test_inputs_A), self.mean_function_B(test_inputs_B)).squeeze()
+        Katat = add_jitter(self.kernel_A.gram(test_inputs_A), jitter)
+        Kbtbt = add_jitter(self.kernel_B.gram(test_inputs_B), jitter)
         prior_cov = Kronecker(Katat, Kbtbt)
 
-        if not self.conditioned_on_functional:
-            res = solve_triangular(self.L_11, self.residual_data, lower=True)
-            res = solve_triangular(self.L_11, res, lower=True, trans="T")
-            res = K_test_train @ res
+        residual = self.compute_data_residual()
+        residual = cho_solve((L, True), residual)
+        residual = K_test_train @ residual
+        X = cho_solve((L, True), K_test_train.mT)
+        X = K_test_train @ X
 
-            X = solve_triangular(self.L_11, K_test_train.mT, lower=True)
-            X = solve_triangular(self.L_11, X, lower=True, trans="T")
-            X = K_test_train @ X
-
-        else:
-            kL = lambda b: self.functional(lambda b_prime: self.kernel_B(b, b_prime))
-            kLB = jax.vmap(kL)(self.B)
-            LkL = jax.vmap(lambda i: self.functional(lambda x: kL(x)[i]))(jnp.arange(self.y_functional.shape[0]))
-            eigvals = jnp.linalg.eigvalsh(LkL)
-            print("Min eig of LkL: ", eigvals.min())
-            kLBt = jax.vmap(kL)(test_inputs_B)
-            kLZ = jnp.kron(Kata.mT, kLB)
-            LkLZ = jnp.kron(Katat.as_matrix(), LkL)
-            L_21 = _stable_solve_triangular(self.L_11, kLZ).mT
-            print("Cond(L21): ", jnp.linalg.cond(L_21))
-            S = LkLZ - L_21 @ L_21.mT
-            S = add_jitter(S, jitter)
-            eigvals = jnp.linalg.eigvalsh(S)
-            print("Min eig of S: ", eigvals.min())
-            L_22 = cholesky(S)
-            print("Cond(L22): ", jnp.linalg.cond(L_22))
-
-            new_y = jnp.kron(jnp.ones((test_inputs_A.shape[0],1)), self.y_functional)
-            mLZ = jnp.kron(self.mean_function_A(test_inputs_A), self.functional(lambda x: self.mean_function_B(jnp.atleast_2d(x)).squeeze())[:,None])
-            residual_functional = new_y - mLZ
-            K_test_functional = jnp.kron(Katat.as_matrix(), kLBt)
-            K_test_conditions = jnp.concatenate((K_test_train, K_test_functional), axis=1)
-
-            res = solve_block_triangular(self.L_11, L_21, L_22, self.residual_data, residual_functional)
-            res = K_test_conditions @ res
-
-            X = solve_block_triangular(self.L_11, L_21, L_22, K_test_train.mT, K_test_functional.mT)
-            X = K_test_conditions @ X
-
-        mean = prior_mean[:,None] + res
+        mean = prior_mean + residual
         print("Mean has Nan: ", jnp.any(jnp.isnan(mean)))
 
-        X = lx.MatrixLinearOperator(X)
-        cov = prior_cov - X
+        cov = prior_cov - lx.MatrixLinearOperator(X)
         print("Min covariance value: ", cov.as_matrix().min())
 
         return GaussianDistribution(loc=jnp.atleast_1d(mean.squeeze()), scale=cov)
@@ -364,9 +332,3 @@ class SeparablePosterior():
         jitter=jitter,
         return_covariance_type=return_covariance_type,
     )
-
-
-def _stable_solve_triangular(M, B, **kwargs):
-    Q, R = qr(M)
-    return solve_triangular(R, Q.T @ B, **kwargs)
-
