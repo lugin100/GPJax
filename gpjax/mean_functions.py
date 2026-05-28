@@ -258,11 +258,10 @@ class ConditionedMean(AbstractMeanFunction):
             Float[Array, "1"]: The evaluated mean function:
             $$ \text{mean}(x) = \text{prior_mean}(x) + \text{kX_train}(x) L^{-T} L^{-1} \text{residual} $$ 
         """
-        x = jnp.atleast_2d(x)
-        prior_mean = self.prior_mean(x)
-        k_xXtrain = self.kX_train(x)
-        return prior_mean + k_xXtrain @ self.representer_weight
-
+        x = jnp.atleast_2d(x)           # (N,D)
+        prior_mean = self.prior_mean(x) # (N,1)
+        k_xXtrain = self.kX_train(x)    # (N,L)
+        return prior_mean + k_xXtrain @ self.representer_weight # (N,1)
 
 __all__ = [
     "AbstractMeanFunction",

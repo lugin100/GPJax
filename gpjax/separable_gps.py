@@ -239,13 +239,16 @@ class SeparablePosterior():
         old_kernel = self.kernel_B
         kL = lambda b: functional(lambda b_prime: old_kernel(b, b_prime))
         LkL = jax.vmap(lambda i: functional(lambda x: kL(x)[i]))(jnp.arange(y.shape[0]))
+        print("Min Eig LkL: ", jnp.linalg.eigh(LkL)[0].min())
+
         #LkL = functional(lambda b: functional(lambda b_prime: old_kernel(b, b_prime)))
         L_L = cholesky(LkL, lower=True)
 
         # GPJax defines mean functions as NxD -> Nx1, whereas functional expects D -> 1
-        Lm = functional(lambda x: old_mean(jnp.atleast_2d(x)).squeeze(-1))
-        residual = y - Lm
-        self.mean_function_B = ConditionedMean(old_mean, L_L, residual, kL)
+        single_mean = lambda x: old_mean(jnp.atleast_2d(x)).squeeze()
+        Lm = functional(single_mean)
+        residual = y - Lm[:,None]
+        self.mean_function_B = ConditionedMean(old_mean, L_L, residual, jax.vmap(kL))
         self.kernel_B = ConditionedKernel(old_kernel, L_L, kL)
 
     def compute_data_residual(self):
@@ -278,7 +281,7 @@ class SeparablePosterior():
             raise ValueError("Can not predict on posterior that has not been conditioned on data. Use prior.predict() instead.")
         #noise = self.likelihood.noise_vector(train_data.n)
         prior_mean = jnp.kron(self.mean_function_A(test_inputs_A), self.mean_function_B(test_inputs_B))
-
+        print(jnp.any(jnp.isnan(prior_mean)))
         self.Kbb = add_jitter(self.kernel_B.gram(self.B).as_matrix(), jitter)
         L = compute_Kronecker_Cholesky(self.Kaa, self.Kbb)
 
