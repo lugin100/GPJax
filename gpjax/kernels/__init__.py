@@ -27,6 +27,7 @@ from gpjax.kernels.base import (
     SumKernel,
 )
 from gpjax.kernels.conditioned import ConditionedKernel
+from gpjax.kernels.separable import SeparableKernel
 from gpjax.kernels.computations import (
     BasisFunctionComputation,
     ConstantDiagonalKernelComputation,
@@ -87,4 +88,5 @@ __all__ = [
     "White",
     "stationary",
     "ConditionedKernel",
+    "SeparableKernel",
 ]
