@@ -51,7 +51,7 @@ class Matern32(StationaryKernel):
             _val(self.lengthscale),
             _val(self.variance))
 
-#@jax.custom_jvp
+@jax.custom_jvp
 def matern32_kernel(x, y, lengthscale, variance):
     x = x / lengthscale
     y = y / lengthscale
@@ -63,37 +63,35 @@ def matern32_kernel(x, y, lengthscale, variance):
     )
     return K.squeeze()
 
-"""
+
 @matern32_kernel.defjvp
-def jvp(primals, tangents):
+def matern32_kernel_jvp(primals, tangents):
     x, y, lengthscale, variance = primals
     x_dot, y_dot, l_dot, v_dot = tangents
-    primal_out = matern32_kernel(x, y, lengthscale, variance)
 
     diff = x - y
-
-    # SAFE norm for primal only
-    r = jnp.linalg.norm(diff)
-    eps = 1e-10
-    r = jnp.maximum(r, eps)
+    # Add eps to avoid r = 0, which would make 2nd derivative undefined
+    eps = 1e-12
+    r = jnp.sqrt(jnp.sum(diff**2) + eps)
     tau = r / lengthscale
 
+    exp_term = jnp.exp(-jnp.sqrt(3.0) * tau)
 
-    dk_dx = -3.0 * variance * jnp.exp(-jnp.sqrt(3.0) * tau) * (x - y) / lengthscale
+    primal_out = variance * (1.0 + jnp.sqrt(3.0) * tau) * exp_term
+
+    dk_dx = -3.0 * variance * exp_term * diff / lengthscale**2
     dk_dy = -dk_dx
-
-    dk_dv = (1.0 + jnp.sqrt(3.0) * tau) * jnp.exp(-jnp.sqrt(3.0) * tau)
-    dk_dl = 3.0 * variance * jnp.exp(-jnp.sqrt(3.0) * tau) * tau**2 / lengthscale
+    dk_dl = 3.0 * variance* exp_term * tau**2 / lengthscale
+    dk_dv = (1.0 + jnp.sqrt(3.0) * tau) * exp_term
 
     tangent_out = (
         jnp.dot(dk_dx, x_dot)
-         + jnp.dot(dk_dy, y_dot)
-         + dk_dl * l_dot
-         + dk_dv * v_dot
-        )
+        + jnp.dot(dk_dy, y_dot)
+        + dk_dl * l_dot
+        + dk_dv * v_dot
+    )
     return primal_out, tangent_out
 
     @property
     def spectral_density(self) -> npd.StudentT:
         return build_student_t_distribution(nu=3)
-"""
