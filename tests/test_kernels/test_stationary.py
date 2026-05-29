@@ -216,8 +216,13 @@ def test_cross_covariance(test_init: StationaryKernel, n_a: int, n_b: int):
     assert isinstance(Kxy, jax.Array)
     assert Kxy.shape == (n_a, n_b)
 
-def test_analytic_gradient_Matern32():
-    kernel = Matern32(active_dims=[0, 1])
 
-    autograd = jax.grad(kernel)
-    print(autograd)
+def test_analytic_gradient_Matern32():
+    X = jnp.array([[0.0, 0.], [0.1, 0.], [0.2, 0.]])
+    kernel = Matern32(active_dims=[0, 1])
+    functional = lambda u: jax.vmap(jax.grad(u))(X)[:,1]
+    kL = lambda b: functional(lambda b_prime: kernel(b, b_prime))
+    LkL = jax.vmap(lambda i: functional(lambda x: kL(x)[i]))(jnp.arange(3))
+    assert LkL.shape == (3,3)
+    assert not jnp.any(jnp.isnan(LkL))
+    assert jnp.linalg.eigvalsh(LkL).min() > 0
