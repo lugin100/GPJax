@@ -215,3 +215,20 @@ def test_cross_covariance(test_init: StationaryKernel, n_a: int, n_b: int):
     Kxy = k.cross_covariance(x, y)
     assert isinstance(Kxy, jax.Array)
     assert Kxy.shape == (n_a, n_b)
+
+
+@pytest.mark.parametrize(
+    "kernel, params", [(cls, p) for cls, params in TESTED_KERNELS for p in params]
+)
+@pytest.mark.parametrize("lengthscale", LENGTHSCALES)
+@pytest.mark.parametrize("variance", VARIANCES)
+def test_second_derivative_is_not_nan(test_init: StationaryKernel):
+    k = test_init
+    X = jnp.array([[0., 0.], [0.1, 0.], [0.2, 0.]])
+    grad_op = lambda u: jax.vmap(jax.grad(u))(X)[:,1]
+    kL = lambda b: grad_op(lambda b_prime: k(b, b_prime))
+    LkL = jax.vmap(lambda i: grad_op(lambda x: kL(x)[i]))(jnp.arange(3))
+
+    assert LkL.shape == (3,3)
+    assert not jnp.any(jnp.isnan(LkL))
+    #assert jnp.linalg.eigvalsh(LkL).min() > 0
