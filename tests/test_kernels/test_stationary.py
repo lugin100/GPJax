@@ -48,18 +48,19 @@ def params_product(params: dict[str, list]) -> list[dict[str, Any]]:
         dict(zip(params.keys(), values, strict=False))
         for values in product(*params.values())
     ]
-
+MATERN_KERNELS = [
+    (Matern12, [{"n_dims": 2}]),
+    (Matern32, [{"n_dims": 2}]),
+    (Matern52, [{"n_dims": 2}]),
+    ]
 
 TESTED_KERNELS = [
-    (RBF, [{}]),
-    (Matern12, [{}]),
-    (Matern32, [{}]),
-    (Matern52, [{}]),
-    (White, [{}]),
+    (RBF, [{"n_dims": 2}]),
+    (White, [{"n_dims": 2}]),
     (Periodic, params_product({"period": [0.1, 1.0]})),
     (PoweredExponential, params_product({"power": [0.1, 0.9]})),
     (RationalQuadratic, params_product({"alpha": [0.1, 1.0]})),
-]
+] + MATERN_KERNELS
 
 LENGTHSCALES = [
     0.1,
@@ -93,7 +94,6 @@ def test_init(kernel_request):
 
     return k
 
-
 @pytest.mark.parametrize(
     "kernel, params", [(cls, p) for cls, params in TESTED_KERNELS for p in params]
 )
@@ -121,7 +121,6 @@ def test_init_override_paramtype(kernel_request):
         if isinstance(attr, AbstractUnwrappable):
             assert jnp.allclose(attr.unwrap(), jnp.asarray(params[param]))
 
-
 @pytest.mark.parametrize("kernel", [k[0] for k in TESTED_KERNELS])
 def test_init_defaults(kernel: type[StationaryKernel]):
     # Initialise kernel
@@ -131,7 +130,6 @@ def test_init_defaults(kernel: type[StationaryKernel]):
     assert isinstance(k.compute_engine, type(AbstractKernelComputation()))
     assert isinstance(k.variance, NonNegativeReal)
     assert isinstance(k.lengthscale, PositiveReal)
-
 
 @pytest.mark.parametrize("kernel", [k[0] for k in TESTED_KERNELS])
 @pytest.mark.parametrize("lengthscale", LENGTHSCALES)
@@ -158,7 +156,6 @@ def test_init_lengthscales(kernel: type[StationaryKernel], lengthscale):
     with pytest.raises(ValueError):
         k = kernel(lengthscale=jnp.ones(2), n_dims=1)
 
-
 @pytest.mark.parametrize("kernel", [k[0] for k in TESTED_KERNELS])
 @pytest.mark.parametrize("variance", VARIANCES)
 def test_init_variances(kernel: type[StationaryKernel], variance):
@@ -172,7 +169,6 @@ def test_init_variances(kernel: type[StationaryKernel], variance):
     # Check that error is raised if variance is not valid
     with pytest.raises((ValueError, TypeError)):
         k = kernel(variance="invalid type")
-
 
 @pytest.mark.parametrize(
     "kernel, params", [(cls, p) for cls, params in TESTED_KERNELS for p in params]
@@ -193,7 +189,6 @@ def test_gram(test_init: StationaryKernel, n: int):
     assert isinstance(Kxx, lx.AbstractLinearOperator)
     assert Kxx.as_matrix().shape == (n, n)
     assert jnp.all(jnp.linalg.eigvalsh(Kxx.as_matrix() + jnp.eye(n) * 1e-6) > 0.0)
-
 
 @pytest.mark.parametrize(
     "kernel, params", [(cls, p) for cls, params in TESTED_KERNELS for p in params]
@@ -216,3 +211,105 @@ def test_cross_covariance(test_init: StationaryKernel, n_a: int, n_b: int):
     assert isinstance(Kxy, jax.Array)
     assert Kxy.shape == (n_a, n_b)
 
+
+@pytest.mark.parametrize(
+    "kernel, params", [(cls, p) for cls, params in MATERN_KERNELS for p in params]
+)
+@pytest.mark.parametrize("lengthscale", LENGTHSCALES)
+@pytest.mark.parametrize("variance", VARIANCES)
+def test_derivative_wrt_x_Matern(test_init: StationaryKernel):
+    k = test_init
+    var = k.variance.unwrap()
+    ell = k.lengthscale.unwrap()
+    x = jnp.array([0., 0.])
+    y = jnp.array([0., 2.])
+
+    if k.name == "Matérn12":
+        dk_dx_ana = lambda var, ell, x, y: -var / ell**2 * (x - y) / jnp.linalg.norm(x - y) * jnp.exp(-jnp.linalg.norm(x - y) / ell)
+    if k.name == "Matérn32":
+        dk_dx_ana = lambda var, ell, x, y: -3*var/ell**2*(x-y)*jnp.exp(-jnp.sqrt(3)*jnp.linalg.norm(x-y)/ell)
+    if k.name == "Matérn52":
+        dk_dx_ana = lambda var, ell, x, y: -(5.0 / 3.0)* var/ ell**2* (x - y)* (1.0 + jnp.sqrt(5.0) * jnp.linalg.norm(x - y) / ell)* jnp.exp(-jnp.sqrt(5.0) * jnp.linalg.norm(x - y) / ell)
+
+    dk_dx_ana = dk_dx_ana(var, ell, x, y)
+    dk_dx = jax.grad(lambda x: k(x,y))(x)
+
+    assert jnp.allclose(dk_dx, dk_dx_ana)
+
+
+@pytest.mark.parametrize(
+    "kernel, params", [(cls, p) for cls, params in MATERN_KERNELS for p in params]
+)
+@pytest.mark.parametrize("lengthscale", LENGTHSCALES)
+@pytest.mark.parametrize("variance", VARIANCES)
+def test_derivative_wrt_y_Matern(test_init: StationaryKernel):
+    k = test_init
+    x = jnp.array([0., 0.])
+    y = jnp.array([0., 2.])
+
+    dk_dx = jax.grad(lambda x: k(x,y))(x)
+
+    dk_dy = jax.grad(lambda y: k(x,y))(y)
+
+    # dk/dx = -dk/dy for Matern kernels
+    assert jnp.allclose(dk_dy, -dk_dx)
+
+
+def test_derivative_wrt_sigma_Matern32():
+    sigma = 3.
+    ell = 1.5
+    x = jnp.array([0., 0.])
+    y = jnp.array([0., 2.])
+    k = lambda sigma: Matern32(n_dims=2, lengthscale=ell, variance=sigma**2)(x,y)
+
+    dk_dsigma_ana = 2 * sigma* (1 + jnp.sqrt(3.) * jnp.linalg.norm(x - y) / ell)* jnp.exp(-jnp.sqrt(3.) * jnp.linalg.norm(x - y) / ell)
+
+    dk_dsigma = jax.grad(k)(sigma)
+
+    assert jnp.allclose(dk_dsigma, dk_dsigma_ana)
+
+
+def test_derivative_wrt_ell_Matern32():
+    sigma = 3.
+    ell = jnp.array([1.5, 0.7])
+    x = jnp.array([0., 0.])
+    y = jnp.array([0., 2.])
+    k = lambda ell: Matern32(n_dims=2, lengthscale=ell, variance=sigma**2)(x,y)
+
+    dk_dell_ana = 3* sigma**2* (x-y)**2/ ell**3 * jnp.exp(-jnp.sqrt(3.) * jnp.linalg.norm((x-y)/ell))
+    dk_dell = jax.grad(k)(ell)
+
+    assert jnp.allclose(dk_dell, dk_dell_ana)
+
+
+@pytest.mark.parametrize(
+    "kernel, params", [(cls, p) for cls, params in MATERN_KERNELS for p in params]
+)
+@pytest.mark.parametrize("lengthscale", LENGTHSCALES)
+@pytest.mark.parametrize("variance", VARIANCES)
+def test_second_derivative_is_finite(test_init: StationaryKernel):
+
+    k = test_init
+    x = jnp.array([0., 0.])
+    y = jnp.array([0., 0.2])
+
+    dk = lambda x: jax.grad(lambda y: k(x,y))(y)[1]
+    ddk = jax.grad(dk)(x)[1]
+
+    assert not jnp.isnan(ddk)
+
+
+@pytest.mark.parametrize(
+    "kernel, params", [(cls, p) for cls, params in MATERN_KERNELS for p in params]
+)
+@pytest.mark.parametrize("lengthscale", LENGTHSCALES)
+@pytest.mark.parametrize("variance", VARIANCES)
+def test_second_derivatives_are_psd(test_init: StationaryKernel):
+
+    k = test_init
+    X = jnp.array([[0., 0.], [0.1, 0.], [0.2, 0.]])
+    grad_op = lambda u: jax.vmap(jax.grad(u))(X)[:,1]
+    kL = lambda b: grad_op(lambda b_prime: k(b, b_prime))
+    LkL = jax.vmap(lambda i: grad_op(lambda x: kL(x)[i]))(jnp.arange(3))
+
+    assert jnp.linalg.eigvalsh(LkL).min() > 0

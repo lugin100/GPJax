@@ -13,6 +13,7 @@
 # limitations under the License.
 # ==============================================================================
 
+import jax
 import jax.numpy as jnp
 from jaxtyping import Float
 import numpyro.distributions as npd
@@ -34,25 +35,80 @@ class Matern52(StationaryKernel):
     lengthscale parameter $\ell$ and variance $\sigma^2$.
 
     $$
-    k(x, y) = \sigma^2 \exp \Bigg(1+ \frac{\sqrt{5}\lvert x-y \rvert}{\ell} + \frac{5\lvert x - y \rvert^2}{3\ell^2} \Bigg)\exp\Bigg(-\frac{\sqrt{5}\lvert x-y\rvert}{\ell^2} \Bigg)
+    k(x, y) = \sigma^2 \Bigg(1+ \frac{\sqrt{5}\lvert x-y \rvert}{\ell} + \frac{5\lvert x - y \rvert^2}{3\ell^2} \Bigg)\exp\Bigg(-\frac{\sqrt{5}\lvert x-y\rvert}{\ell^2} \Bigg)
     $$
     """
 
     name: str = "Matérn52"
 
     def __call__(
-        self, x: Float[Array, " D"], y: Float[Array, " D"]
+        self,
+        x: Float[Array, " D"],
+        y: Float[Array, " D"],
     ) -> Float[Array, ""]:
-        x = self.slice_input(x) / _val(self.lengthscale)
-        y = self.slice_input(y) / _val(self.lengthscale)
-        tau = euclidean_distance(x, y)
-        K = (
-            _val(self.variance)
-            * (1.0 + jnp.sqrt(5.0) * tau + 5.0 / 3.0 * jnp.square(tau))
-            * jnp.exp(-jnp.sqrt(5.0) * tau)
-        )
-        return K.squeeze()
+        out = matern52_kernel(
+            self.slice_input(x),
+            self.slice_input(y),
+            _val(self.lengthscale),
+            _val(self.variance))
+        return out
 
     @property
     def spectral_density(self) -> npd.StudentT:
         return build_student_t_distribution(nu=5)
+
+
+@jax.custom_jvp
+def matern52_kernel(x, y, lengthscale, variance):
+    x = x / lengthscale
+    y = y / lengthscale
+    tau = euclidean_distance(x, y)
+    K = (
+        variance
+        * (1.0 + jnp.sqrt(5.0) * tau + 5./3. * tau**2)
+        * jnp.exp(-jnp.sqrt(5.0) * tau)
+    )
+    return K.squeeze()
+
+
+@matern52_kernel.defjvp
+def matern52_kernel_jvp(primals, tangents):
+    x, y, lengthscale, variance = primals
+    x_dot, y_dot, l_dot, v_dot = tangents
+
+    x = x / lengthscale
+    y = y / lengthscale
+    # Clip with eps to avoid tau = 0, which would make 2nd derivative unstable
+    eps = 1e-12
+    tau = jnp.maximum(euclidean_distance(x, y), eps)
+
+    exp_term = jnp.exp(-jnp.sqrt(5.0) * tau)
+
+    primal_out = (
+        variance
+        * (1.0 + jnp.sqrt(5.0) * tau + 5./3. * tau**2)
+        * exp_term
+        )
+
+    dk_dx = (
+        -5./3. * variance * exp_term
+        * (1. + jnp.sqrt(5) * tau) * (x - y) / lengthscale
+        )
+    dk_dy = -dk_dx
+    dk_dv = (1.0 + jnp.sqrt(5.) * tau + 5./3. * tau**2) * exp_term
+    dk_dl = (
+        5./3. * variance * exp_term
+        *(1. + jnp.sqrt(5) * tau) * (x - y)**2 / lengthscale**2
+        )
+    # For n_dim>1, lengthscale can still be scalar (isotropic)
+    # In this case, sum up derivatives along dimension
+    if lengthscale.ndim == 0:
+        dk_dl = jnp.sum(dk_dl)
+
+    tangent_out = (
+        jnp.dot(dk_dx, x_dot)
+        + jnp.dot(dk_dy, y_dot)
+        + jnp.dot(dk_dl, l_dot)
+        + dk_dv * v_dot     # variance is always scalar
+    )
+    return primal_out, tangent_out
