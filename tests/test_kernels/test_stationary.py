@@ -94,7 +94,6 @@ def test_init(kernel_request):
 
     return k
 
-#@pytest.mark.skip()
 @pytest.mark.parametrize(
     "kernel, params", [(cls, p) for cls, params in TESTED_KERNELS for p in params]
 )
@@ -122,7 +121,6 @@ def test_init_override_paramtype(kernel_request):
         if isinstance(attr, AbstractUnwrappable):
             assert jnp.allclose(attr.unwrap(), jnp.asarray(params[param]))
 
-#@pytest.mark.skip()
 @pytest.mark.parametrize("kernel", [k[0] for k in TESTED_KERNELS])
 def test_init_defaults(kernel: type[StationaryKernel]):
     # Initialise kernel
@@ -133,7 +131,6 @@ def test_init_defaults(kernel: type[StationaryKernel]):
     assert isinstance(k.variance, NonNegativeReal)
     assert isinstance(k.lengthscale, PositiveReal)
 
-#@pytest.mark.skip()
 @pytest.mark.parametrize("kernel", [k[0] for k in TESTED_KERNELS])
 @pytest.mark.parametrize("lengthscale", LENGTHSCALES)
 def test_init_lengthscales(kernel: type[StationaryKernel], lengthscale):
@@ -159,7 +156,6 @@ def test_init_lengthscales(kernel: type[StationaryKernel], lengthscale):
     with pytest.raises(ValueError):
         k = kernel(lengthscale=jnp.ones(2), n_dims=1)
 
-#@pytest.mark.skip()
 @pytest.mark.parametrize("kernel", [k[0] for k in TESTED_KERNELS])
 @pytest.mark.parametrize("variance", VARIANCES)
 def test_init_variances(kernel: type[StationaryKernel], variance):
@@ -174,7 +170,6 @@ def test_init_variances(kernel: type[StationaryKernel], variance):
     with pytest.raises((ValueError, TypeError)):
         k = kernel(variance="invalid type")
 
-#@pytest.mark.skip()
 @pytest.mark.parametrize(
     "kernel, params", [(cls, p) for cls, params in TESTED_KERNELS for p in params]
 )
@@ -195,7 +190,6 @@ def test_gram(test_init: StationaryKernel, n: int):
     assert Kxx.as_matrix().shape == (n, n)
     assert jnp.all(jnp.linalg.eigvalsh(Kxx.as_matrix() + jnp.eye(n) * 1e-6) > 0.0)
 
-#@pytest.mark.skip()
 @pytest.mark.parametrize(
     "kernel, params", [(cls, p) for cls, params in TESTED_KERNELS for p in params]
 )
