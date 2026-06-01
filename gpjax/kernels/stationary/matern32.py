@@ -49,8 +49,12 @@ class Matern32(StationaryKernel):
             self.slice_input(y),
             _val(self.lengthscale),
             _val(self.variance))
-        print(out)
         return out
+
+    @property
+    def spectral_density(self) -> npd.StudentT:
+        return build_student_t_distribution(nu=3)
+
 
 @jax.custom_jvp
 def matern32_kernel(x, y, lengthscale, variance):
@@ -92,7 +96,3 @@ def matern32_kernel_jvp(primals, tangents):
         + dk_dv * v_dot
     )
     return primal_out, tangent_out
-
-    @property
-    def spectral_density(self) -> npd.StudentT:
-        return build_student_t_distribution(nu=3)
