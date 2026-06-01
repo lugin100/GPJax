@@ -49,14 +49,14 @@ def params_product(params: dict[str, list]) -> list[dict[str, Any]]:
         for values in product(*params.values())
     ]
 MATERN_KERNELS = [
-    (Matern12, [{}]),
-    (Matern32, [{}]),
-    (Matern52, [{}]),
+    (Matern12, [{"n_dims": 2}]),
+    (Matern32, [{"n_dims": 2}]),
+    (Matern52, [{"n_dims": 2}]),
     ]
 
 TESTED_KERNELS = [
-    (RBF, [{}]),
-    (White, [{}]),
+    (RBF, [{"n_dims": 2}]),
+    (White, [{"n_dims": 2}]),
     (Periodic, params_product({"period": [0.1, 1.0]})),
     (PoweredExponential, params_product({"power": [0.1, 0.9]})),
     (RationalQuadratic, params_product({"alpha": [0.1, 1.0]})),
@@ -94,7 +94,7 @@ def test_init(kernel_request):
 
     return k
 
-@pytest.mark.skip()
+#@pytest.mark.skip()
 @pytest.mark.parametrize(
     "kernel, params", [(cls, p) for cls, params in TESTED_KERNELS for p in params]
 )
@@ -122,7 +122,7 @@ def test_init_override_paramtype(kernel_request):
         if isinstance(attr, AbstractUnwrappable):
             assert jnp.allclose(attr.unwrap(), jnp.asarray(params[param]))
 
-@pytest.mark.skip()
+#@pytest.mark.skip()
 @pytest.mark.parametrize("kernel", [k[0] for k in TESTED_KERNELS])
 def test_init_defaults(kernel: type[StationaryKernel]):
     # Initialise kernel
@@ -133,7 +133,7 @@ def test_init_defaults(kernel: type[StationaryKernel]):
     assert isinstance(k.variance, NonNegativeReal)
     assert isinstance(k.lengthscale, PositiveReal)
 
-@pytest.mark.skip()
+#@pytest.mark.skip()
 @pytest.mark.parametrize("kernel", [k[0] for k in TESTED_KERNELS])
 @pytest.mark.parametrize("lengthscale", LENGTHSCALES)
 def test_init_lengthscales(kernel: type[StationaryKernel], lengthscale):
@@ -159,7 +159,7 @@ def test_init_lengthscales(kernel: type[StationaryKernel], lengthscale):
     with pytest.raises(ValueError):
         k = kernel(lengthscale=jnp.ones(2), n_dims=1)
 
-@pytest.mark.skip()
+#@pytest.mark.skip()
 @pytest.mark.parametrize("kernel", [k[0] for k in TESTED_KERNELS])
 @pytest.mark.parametrize("variance", VARIANCES)
 def test_init_variances(kernel: type[StationaryKernel], variance):
@@ -174,7 +174,7 @@ def test_init_variances(kernel: type[StationaryKernel], variance):
     with pytest.raises((ValueError, TypeError)):
         k = kernel(variance="invalid type")
 
-@pytest.mark.skip()
+#@pytest.mark.skip()
 @pytest.mark.parametrize(
     "kernel, params", [(cls, p) for cls, params in TESTED_KERNELS for p in params]
 )
@@ -195,7 +195,7 @@ def test_gram(test_init: StationaryKernel, n: int):
     assert Kxx.as_matrix().shape == (n, n)
     assert jnp.all(jnp.linalg.eigvalsh(Kxx.as_matrix() + jnp.eye(n) * 1e-6) > 0.0)
 
-@pytest.mark.skip()
+#@pytest.mark.skip()
 @pytest.mark.parametrize(
     "kernel, params", [(cls, p) for cls, params in TESTED_KERNELS for p in params]
 )
@@ -288,9 +288,14 @@ def test_derivative_wrt_ell_Matern32():
     assert jnp.allclose(dk_dell, dk_dell_ana)
 
 
-def test_second_derivative_is_finite():
+@pytest.mark.parametrize(
+    "kernel, params", [(cls, p) for cls, params in MATERN_KERNELS for p in params]
+)
+@pytest.mark.parametrize("lengthscale", LENGTHSCALES)
+@pytest.mark.parametrize("variance", VARIANCES)
+def test_second_derivative_is_finite(test_init: StationaryKernel):
 
-    k = Matern32(n_dims=2)
+    k = test_init
     x = jnp.array([0., 0.])
     y = jnp.array([0., 0.2])
 
@@ -300,9 +305,14 @@ def test_second_derivative_is_finite():
     assert not jnp.isnan(ddk)
 
 
-def test_second_derivatives_are_psd():
+@pytest.mark.parametrize(
+    "kernel, params", [(cls, p) for cls, params in MATERN_KERNELS for p in params]
+)
+@pytest.mark.parametrize("lengthscale", LENGTHSCALES)
+@pytest.mark.parametrize("variance", VARIANCES)
+def test_second_derivatives_are_psd(test_init: StationaryKernel):
 
-    k = Matern32(n_dims=2)
+    k = test_init
     X = jnp.array([[0., 0.], [0.1, 0.], [0.2, 0.]])
     grad_op = lambda u: jax.vmap(jax.grad(u))(X)[:,1]
     kL = lambda b: grad_op(lambda b_prime: k(b, b_prime))
