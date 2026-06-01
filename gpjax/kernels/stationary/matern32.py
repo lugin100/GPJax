@@ -76,7 +76,6 @@ def matern32_kernel_jvp(primals, tangents):
 
     x = x / lengthscale
     y = y / lengthscale
-    diff = x - y
     # Clip with eps to avoid tau = 0, which would make 2nd derivative unstable
     eps = 1e-12
     tau = jnp.maximum(euclidean_distance(x, y), eps)
@@ -89,10 +88,11 @@ def matern32_kernel_jvp(primals, tangents):
     dk_dy = -dk_dx
     dk_dv = (1.0 + jnp.sqrt(3.0) * tau) * exp_term
     dk_dl = 3.0 * variance * exp_term * (x - y)**2 / lengthscale
-    # diff might have D>1 even if lengthscale is scalar (isotropic)
+    # For n_dim>1, lengthscale can still be scalar (isotropic)
+    # In this case, sum up derivatives along dimension
     if lengthscale.ndim == 0:
         dk_dl = jnp.sum(dk_dl)
-    
+
     tangent_out = (
         jnp.dot(dk_dx, x_dot)
         + jnp.dot(dk_dy, y_dot)
