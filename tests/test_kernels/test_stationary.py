@@ -216,6 +216,18 @@ def test_cross_covariance(test_init: StationaryKernel, n_a: int, n_b: int):
     assert isinstance(Kxy, jax.Array)
     assert Kxy.shape == (n_a, n_b)
 
+def test_derivative_wrt_x_Matern32():
+    sigma = 3.
+    ell = 1.5
+    k = Matern32(n_dims=2, lengthscale=ell, variance=sigma**2)
+    y = jnp.array([0., 2.])
+    x = jnp.array([0., 0.])
+    dk_dx_ana = -3*sigma**2/ell**2*(x-y)*jnp.exp(-jnp.sqrt(3)*jnp.linalg.norm(x-y)/ell)
+
+    dk_dx = jax.grad(lambda x: k(x,y))(x)
+
+    assert jnp.allclose(dk_dx, dk_dx_ana)
+
 
 #@pytest.mark.parametrize(
 #    "kernel, params", [(cls, p) for cls, params in TESTED_KERNELS for p in params]
@@ -234,3 +246,4 @@ def test_second_derivative_is_not_nan():
     assert LkL.shape == (3,3)
     assert not jnp.any(jnp.isnan(LkL))
     #assert jnp.linalg.eigvalsh(LkL).min() > 0
+
