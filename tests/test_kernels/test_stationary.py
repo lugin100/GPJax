@@ -231,7 +231,7 @@ def test_derivative_wrt_x_Matern(test_init: StationaryKernel):
     y = jnp.array([0., 2.])
 
     if k.name == "Matérn12":
-        dk_dx_ana = lambda var, ell, x, y: -var / ell* (x - y) / jnp.linalg.norm(x - y) * jnp.exp(-jnp.linalg.norm(x - y) / ell)
+        dk_dx_ana = lambda var, ell, x, y: -var / ell**2 * (x - y) / jnp.linalg.norm(x - y) * jnp.exp(-jnp.linalg.norm(x - y) / ell)
     if k.name == "Matérn32":
         dk_dx_ana = lambda var, ell, x, y: -3*var/ell**2*(x-y)*jnp.exp(-jnp.sqrt(3)*jnp.linalg.norm(x-y)/ell)
     if k.name == "Matérn52":
