@@ -228,6 +228,19 @@ def test_derivative_wrt_x_Matern32():
 
     assert jnp.allclose(dk_dx, dk_dx_ana)
 
+def test_derivative_wrt_y_Matern32():
+    sigma = 3.
+    ell = 1.5
+    k = Matern32(n_dims=2, lengthscale=ell, variance=sigma**2)
+    y = jnp.array([0., 2.])
+    x = jnp.array([0., 0.])
+    dk_dy_ana = -3*sigma**2/ell**2*(x-y)*jnp.exp(-jnp.sqrt(3)*jnp.linalg.norm(x-y)/ell)
+
+    dk_dx = jax.grad(lambda x: k(x,y))(x)
+    dk_dy = jax.grad(lambda y: k(x,y))(y)
+
+    # dk/dx = -dk/dy for Matern kernels
+    assert jnp.allclose(dk_dy, -dk_dx)
 
 #@pytest.mark.parametrize(
 #    "kernel, params", [(cls, p) for cls, params in TESTED_KERNELS for p in params]
