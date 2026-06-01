@@ -74,30 +74,29 @@ def matern32_kernel_jvp(primals, tangents):
     x, y, lengthscale, variance = primals
     x_dot, y_dot, l_dot, v_dot = tangents
 
-    diff = (x - y)/ lengthscale
-    # Add eps to avoid r = 0, which would make 2nd derivative undefined
+    x = x / lengthscale
+    y = y / lengthscale
+    diff = x - y
+    # Clip with eps to avoid tau = 0, which would make 2nd derivative unstable
     eps = 1e-12
-    r = jnp.sqrt(jnp.sum(diff**2, axis=-1) + eps)
-    tau = r
+    tau = jnp.maximum(euclidean_distance(x, y), eps)
 
     exp_term = jnp.exp(-jnp.sqrt(3.0) * tau)
 
     primal_out = variance * (1.0 + jnp.sqrt(3.0) * tau) * exp_term
 
-    dk_dx = -3.0 * variance * exp_term * diff / lengthscale
+    dk_dx = -3.0 * variance * exp_term * (x - y) / lengthscale
     dk_dy = -dk_dx
-    dk_dl = 3.0 * variance * exp_term * diff**2 / lengthscale
-    # diff might have D>1 even if lengthsclae is scalar (isotropic)
+    dk_dv = (1.0 + jnp.sqrt(3.0) * tau) * exp_term
+    dk_dl = 3.0 * variance * exp_term * (x - y)**2 / lengthscale
+    # diff might have D>1 even if lengthscale is scalar (isotropic)
     if lengthscale.ndim == 0:
         dk_dl = jnp.sum(dk_dl)
-    dk_dv = (1.0 + jnp.sqrt(3.0) * tau) * exp_term
-    print(dk_dl.shape)
-    print(l_dot.shape)
-    print(jnp.dot(dk_dl, l_dot).shape)
+    
     tangent_out = (
         jnp.dot(dk_dx, x_dot)
         + jnp.dot(dk_dy, y_dot)
         + jnp.dot(dk_dl, l_dot)
-        + dk_dv * v_dot
+        + dk_dv * v_dot     # variance is always scalar
     )
     return primal_out, tangent_out
