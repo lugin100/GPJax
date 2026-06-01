@@ -48,18 +48,19 @@ def params_product(params: dict[str, list]) -> list[dict[str, Any]]:
         dict(zip(params.keys(), values, strict=False))
         for values in product(*params.values())
     ]
-
-
-TESTED_KERNELS = [
-    (RBF, [{}]),
+MATERN_KERNELS = [
     (Matern12, [{}]),
     (Matern32, [{}]),
     (Matern52, [{}]),
+    ]
+
+TESTED_KERNELS = [
+    (RBF, [{}]),
     (White, [{}]),
     (Periodic, params_product({"period": [0.1, 1.0]})),
     (PoweredExponential, params_product({"power": [0.1, 0.9]})),
     (RationalQuadratic, params_product({"alpha": [0.1, 1.0]})),
-]
+] + MATERN_KERNELS
 
 LENGTHSCALES = [
     0.1,
@@ -217,15 +218,26 @@ def test_cross_covariance(test_init: StationaryKernel, n_a: int, n_b: int):
     assert Kxy.shape == (n_a, n_b)
 
 
-def test_derivative_wrt_x_Matern32():
-    sigma = 3.
-    ell = 1.5
+@pytest.mark.parametrize(
+    "kernel, params", [(cls, p) for cls, params in MATERN_KERNELS for p in params]
+)
+@pytest.mark.parametrize("lengthscale", LENGTHSCALES)
+@pytest.mark.parametrize("variance", VARIANCES)
+def test_derivative_wrt_x_Matern(test_init: StationaryKernel):
+    k = test_init
+    var = k.variance.unwrap()
+    ell = k.lengthscale.unwrap()
     x = jnp.array([0., 0.])
     y = jnp.array([0., 2.])
-    k = Matern32(n_dims=2, lengthscale=ell, variance=sigma**2)
 
-    dk_dx_ana = -3*sigma**2/ell**2*(x-y)*jnp.exp(-jnp.sqrt(3)*jnp.linalg.norm(x-y)/ell)
+    if k.name == "Matérn12":
+        dk_dx_ana = lambda var, ell, x, y: -var / ell* (x - y) / jnp.linalg.norm(x - y) * jnp.exp(-jnp.linalg.norm(x - y) / ell)
+    if k.name == "Matérn32":
+        dk_dx_ana = lambda var, ell, x, y: -3*var/ell**2*(x-y)*jnp.exp(-jnp.sqrt(3)*jnp.linalg.norm(x-y)/ell)
+    if k.name == "Matérn52":
+        dk_dx_ana = lambda var, ell, x, y: -(5.0 / 3.0)* var/ ell**2* (x - y)* (1.0 + jnp.sqrt(5.0) * jnp.linalg.norm(x - y) / ell)* jnp.exp(-jnp.sqrt(5.0) * jnp.linalg.norm(x - y) / ell)
 
+    dk_dx_ana = dk_dx_ana(var, ell, x, y)
     dk_dx = jax.grad(lambda x: k(x,y))(x)
 
     assert jnp.allclose(dk_dx, dk_dx_ana)
