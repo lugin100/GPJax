@@ -267,19 +267,25 @@ def test_derivative_wrt_ell_Matern32():
     y = jnp.array([0., 2.])
     k = lambda ell: Matern32(n_dims=2, lengthscale=ell, variance=sigma**2)(x,y)
 
-    dk_dell_ana = 3* sigma**2* (x-y)**2/ ell**3* jnp.exp(-jnp.sqrt(3.) * jnp.linalg.norm((x-y)/ell))
+    dk_dell_ana = 3* sigma**2* (x-y)**2/ ell**3 * jnp.exp(-jnp.sqrt(3.) * jnp.linalg.norm((x-y)/ell))
     dk_dell = jax.grad(k)(ell)
 
     assert jnp.allclose(dk_dell, dk_dell_ana)
 
 
-#@pytest.mark.parametrize(
-#    "kernel, params", [(cls, p) for cls, params in TESTED_KERNELS for p in params]
-#)
-#@pytest.mark.parametrize("lengthscale", LENGTHSCALES)
-#@pytest.mark.parametrize("variance", VARIANCES)
-#def test_second_derivative_is_not_nan(test_init: StationaryKernel):
-def test_second_derivative_is_not_nan():
+def test_second_derivative_is_finite():
+
+    k = Matern32(n_dims=2)
+    x = jnp.array([0., 0.])
+    y = jnp.array([0., 0.2])
+
+    dk = lambda x: jax.grad(lambda y: k(x,y))(y)[1]
+    ddk = jax.grad(dk)(x)[1]
+
+    assert not jnp.isnan(ddk)
+
+
+def test_second_derivatives_are_psd():
 
     k = Matern32(n_dims=2)
     X = jnp.array([[0., 0.], [0.1, 0.], [0.2, 0.]])
@@ -287,7 +293,5 @@ def test_second_derivative_is_not_nan():
     kL = lambda b: grad_op(lambda b_prime: k(b, b_prime))
     LkL = jax.vmap(lambda i: grad_op(lambda x: kL(x)[i]))(jnp.arange(3))
 
-    assert LkL.shape == (3,3)
-    assert not jnp.any(jnp.isnan(LkL))
-    #assert jnp.linalg.eigvalsh(LkL).min() > 0
+    assert jnp.linalg.eigvalsh(LkL).min() > 0
 
