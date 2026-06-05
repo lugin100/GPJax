@@ -282,7 +282,7 @@ class SeparablePosterior():
         # Compute K_test_train
         Kata = self.kernel_A.cross_covariance(test_inputs_A, self.A)
         Kbtb = self.kernel_B.cross_covariance(test_inputs_B, self.B)
-        K_test_train = jnp.kron(Kata, Kbtb)
+        K_test_train = Kronecker(lx.MatrixLinearOperator(Kata), lx.MatrixLinearOperator(Kbtb))
 
         # Compute prior mean
         mean_A_test = self.mean_function_A(test_inputs_A)
@@ -299,7 +299,7 @@ class SeparablePosterior():
             res = solve_triangular(self.L_11, res, lower=True, trans="T")
             res = K_test_train @ res
 
-            X = solve_triangular(self.L_11, K_test_train.mT, lower=True)
+            X = solve_triangular(self.L_11, K_test_train.as_matrix().mT, lower=True)
             X = solve_triangular(self.L_11, X, lower=True, trans="T")
             X = K_test_train @ X
 
@@ -320,12 +320,12 @@ class SeparablePosterior():
             new_y = jnp.kron(jnp.ones((test_inputs_A.shape[0],1)), self.y_functional)
             mLZ = jnp.kron(self.mean_function_A(test_inputs_A), self.functional(lambda x: self.mean_function_B(jnp.atleast_2d(x)).squeeze())[:,None])
             residual_functional = new_y - mLZ
-            K_test_functional = jnp.kron(Katat.as_matrix(), kLBt)
+            K_test_functional = Kronecker(Katat, lx.MatrixLinearOperator(kLBt))
 
             blocks = solve_block_triangular(self.L_11, L_21, L_22, self.residual_data, residual_functional)
             res = K_test_train @ blocks[0] + K_test_functional @ blocks[1]
 
-            blocks = solve_block_triangular(self.L_11, L_21, L_22, K_test_train.mT, K_test_functional.mT)
+            blocks = solve_block_triangular(self.L_11, L_21, L_22, K_test_train.as_matrix().mT, K_test_functional.as_matrix().mT)
             X = K_test_train @ blocks[0] + K_test_functional @ blocks[1]
 
         mean = prior_mean[:,None] + res
