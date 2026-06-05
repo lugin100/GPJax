@@ -304,20 +304,16 @@ class SeparablePosterior():
         else:
             kL = lambda b: self.functional(lambda b_prime: self.kernel_B(b, b_prime))
             kLB = jax.vmap(kL)(self.B)
-            LkL = jax.vmap(lambda i: self.functional(lambda x: kL(x)[i]))(jnp.arange(self.y_functional.shape[0]))
-            eigvals = jnp.linalg.eigvalsh(LkL)
-            print("Min eig of LkL: ", eigvals.min())
             kLBt = jax.vmap(kL)(test_inputs_B)
             kLZ = jnp.kron(Kata.mT, kLB)
+
+            LkL = jax.vmap(lambda i: self.functional(lambda x: kL(x)[i]))(jnp.arange(self.y_functional.shape[0]))
             LkLZ = jnp.kron(Katat.as_matrix(), LkL)
+            
             L_21 = solve_triangular(self.L_11, kLZ, lower=True).mT
-            print("Cond(L21): ", jnp.linalg.cond(L_21))
             S = LkLZ - L_21 @ L_21.mT
             S = add_jitter(S, jitter)
-            eigvals = jnp.linalg.eigvalsh(S)
-            print("Min eig of S: ", eigvals.min())
             L_22 = cholesky(S, lower=True)
-            print("Cond(L22): ", jnp.linalg.cond(L_22))
 
             new_y = jnp.kron(jnp.ones((test_inputs_A.shape[0],1)), self.y_functional)
             mLZ = jnp.kron(self.mean_function_A(test_inputs_A), self.functional(lambda x: self.mean_function_B(jnp.atleast_2d(x)).squeeze())[:,None])
@@ -332,11 +328,9 @@ class SeparablePosterior():
             X = K_test_conditions @ X
 
         mean = prior_mean[:,None] + res
-        print("Mean has Nan: ", jnp.any(jnp.isnan(mean)))
 
         X = lx.MatrixLinearOperator(X)
         cov = prior_cov - X
-        print("Min covariance value: ", cov.as_matrix().min())
 
         return GaussianDistribution(loc=jnp.atleast_1d(mean.squeeze()), scale=cov)
 
