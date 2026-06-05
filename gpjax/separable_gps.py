@@ -277,15 +277,19 @@ class SeparablePosterior():
             raise ValueError("Can not predict on posterior that has not been conditioned on data. Use prior.predict() instead.")
         #noise = self.likelihood.noise_vector(train_data.n)
 
-        # Kernel computations
+        # Compute K_test_train
         Kata = self.kernel_A.cross_covariance(test_inputs_A, self.A)
         Kbtb = self.kernel_B.cross_covariance(test_inputs_B, self.B)
-        Katat = add_jitter(self.kernel_A.gram(test_inputs_A), jitter)
-        Kbtbt = add_jitter(self.kernel_B.gram(test_inputs_B), jitter)
-
         K_test_train = jnp.kron(Kata, Kbtb)
 
-        prior_mean = jnp.kron(self.mean_function_A(test_inputs_A), self.mean_function_B(test_inputs_B)).squeeze()
+        # Compute prior mean
+        mean_A_test = self.mean_function_A(test_inputs_A)
+        mean_B_test = self.mean_function_B(test_inputs_B)
+        prior_mean = jnp.kron(mean_A_test, mean_B_test).squeeze()
+
+        # Compute prior covariance
+        Katat = add_jitter(self.kernel_A.gram(test_inputs_A), jitter)
+        Kbtbt = add_jitter(self.kernel_B.gram(test_inputs_B), jitter)
         prior_cov = Kronecker(Katat, Kbtbt)
 
         if not self.conditioned_on_functional:
