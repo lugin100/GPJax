@@ -321,13 +321,12 @@ class SeparablePosterior():
             mLZ = jnp.kron(self.mean_function_A(test_inputs_A), self.functional(lambda x: self.mean_function_B(jnp.atleast_2d(x)).squeeze())[:,None])
             residual_functional = new_y - mLZ
             K_test_functional = jnp.kron(Katat.as_matrix(), kLBt)
-            K_test_conditions = jnp.concatenate((K_test_train, K_test_functional), axis=1)
 
-            res = solve_block_triangular(self.L_11, L_21, L_22, self.residual_data, residual_functional)
-            res = K_test_conditions @ res
+            blocks = solve_block_triangular(self.L_11, L_21, L_22, self.residual_data, residual_functional)
+            res = K_test_train @ blocks[0] + K_test_functional @ blocks[1]
 
-            X = solve_block_triangular(self.L_11, L_21, L_22, K_test_train.mT, K_test_functional.mT)
-            X = K_test_conditions @ X
+            blocks = solve_block_triangular(self.L_11, L_21, L_22, K_test_train.mT, K_test_functional.mT)
+            X = K_test_train @ blocks[0] + K_test_functional @ blocks[1]
 
         mean = prior_mean[:,None] + res
 

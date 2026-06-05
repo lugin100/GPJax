@@ -13,4 +13,4 @@ def solve_block_triangular(L11, L21, L22, b1, b2):
     # Block backward substitution
     x2 = solve_triangular(L22.mT, y2, lower=False)
     x1 = solve_triangular(L11.mT, y1 - L21.T @ x2, lower=False)
-    return jnp.concatenate([x1, x2], axis=0)
+    return x1, x2
