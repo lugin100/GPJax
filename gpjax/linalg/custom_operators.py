@@ -59,6 +59,9 @@ class Kronecker(lx.AbstractLinearOperator):
         AXBt = jax.vmap(self.B.mv, in_axes=0, out_axes=0)(AX)
         return AXBt.ravel()
 
+    def __matmul__(self, other):
+        return jax.vmap(self.mv, in_axes=1, out_axes=1)(other)
+
     def as_matrix(self):
         return jnp.kron(self.A.as_matrix(), self.B.as_matrix())
 
