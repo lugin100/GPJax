@@ -4,7 +4,6 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 from jax.scipy.linalg import (
-    qr,
     solve_triangular,
     cholesky
 )
@@ -307,7 +306,7 @@ class SeparablePosterior():
             kLBt = jax.vmap(kL)(test_inputs_B)
             kLZ = jnp.kron(Kata.mT, kLB)
             LkLZ = jnp.kron(Katat.as_matrix(), LkL)
-            L_21 = _stable_solve_triangular(self.L_11, kLZ).mT
+            L_21 = solve_triangular(self.L_11, kLZ, lower=True).mT
             print("Cond(L21): ", jnp.linalg.cond(L_21))
             S = LkLZ - L_21 @ L_21.mT
             S = add_jitter(S, jitter)
@@ -364,9 +363,3 @@ class SeparablePosterior():
         jitter=jitter,
         return_covariance_type=return_covariance_type,
     )
-
-
-def _stable_solve_triangular(M, B, **kwargs):
-    Q, R = qr(M)
-    return solve_triangular(R, Q.T @ B, **kwargs)
-
