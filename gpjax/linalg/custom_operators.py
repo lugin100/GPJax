@@ -60,17 +60,11 @@ class Kronecker(lx.AbstractLinearOperator):
         return AXBt.ravel()
 
     def __matmul__(self, other):
-        n_A = self.A.in_structure().shape[0]
-        n_B = self.B.in_structure().shape[0]
-        m = other.shape[1] if other.ndim == 2 else 1
-        # Reshape other to (n_A, n_B, m)
-        X = other.reshape(n_A, n_B, m)
-        # For each column, apply mv
-        def apply_kron_to_col(col):
-            return self.mv(col.reshape(-1)).reshape(n_A, n_B)
-        AXBt = jax.vmap(apply_kron_to_col)(X.reshape(-1, m))
-        return AXBt.reshape(-1, m)
-    
+        if isinstance(other, Kronecker):
+            # mixed product formula
+            return Kronecker(self.A @ other.A, self.B @ other.B)
+        return jax.vmap(self.mv, in_axes=1, out_axes=1)(other)
+
     def as_matrix(self):
         return jnp.kron(self.A.as_matrix(), self.B.as_matrix())
 
@@ -171,4 +165,8 @@ def diagonal_kronecker(op):
 @lx.conj.register(Kronecker)
 def conj_kronecker(op):
     return Kronecker(lx.conj(op.A), lx.conj(op.B))
+
+@lx.linearise.register(Kronecker)
+def linearise_kronecker(op):
+    return op # already linear
 

@@ -21,6 +21,7 @@ def solve_triangular(L, b, **kwargs):
     solver = lx.Normal(lx.CG(rtol=1e-9, atol=1e-9))
     B = jnp.atleast_2d(b)
     solve = lambda b: lx.linear_solve(L, b, solver)
+    #solve = lambda b: scipy_solve(L.as_matrix(), b, kwargs)
     return jax.vmap(solve, in_axes=1, out_axes=1)(B)
 
 
