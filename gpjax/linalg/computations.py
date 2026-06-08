@@ -1,7 +1,7 @@
 import jax
 from jax import numpy as jnp
 from jax.scipy.linalg import solve_triangular as scipy_solve
-
+import lineax as lx
 
 def solve_triangular(L, b, **kwargs):
     r"""Compute the linear system Lx = b.
@@ -14,7 +14,15 @@ def solve_triangular(L, b, **kwargs):
     """
     if isinstance(L, jax.Array):
         return scipy_solve(L, b, **kwargs)
-    return scipy_solve(L.as_matrix(), b, **kwargs)
+
+    if "trans" in kwargs:
+        if kwargs["trans"] == "T":
+            L = L.transpose()
+    solver = lx.Normal(lx.CG(rtol=1e-9, atol=1e-9))
+    B = jnp.atleast_2d(b)
+    solve = lambda b: lx.linear_solve(L, b, solver)
+    return jax.vmap(solve, in_axes=1, out_axes=1)(B)
+
 
 def solve_block_triangular(L11, L21, L22, b1, b2):
     r"""Compute $(L L^T)^{-1} b$ where 
