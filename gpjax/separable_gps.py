@@ -3,10 +3,8 @@ from typing import Literal
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-from jax.scipy.linalg import (
-    solve_triangular,
-    cholesky
-)
+from jax.scipy.linalg import cholesky
+
 from jaxtyping import (
     Float,
     Num,
@@ -17,7 +15,7 @@ import lineax as lx
 from gpjax.distributions import GaussianDistribution
 from gpjax.likelihoods import AbstractLikelihood, Gaussian
 from gpjax.gps import AbstractPrior, AbstractPosterior
-from gpjax.linalg import add_jitter, solve_block_triangular
+from gpjax.linalg import add_jitter, solve_block_triangular, solve_triangular
 from gpjax.linalg.custom_operators import Kronecker
 
 L = tp.TypeVar("L", bound=AbstractLikelihood)
@@ -223,9 +221,9 @@ class SeparablePosterior():
         self.B = train_data.B
         self.Kaa = add_jitter(self.kernel_A.gram(self.A).as_matrix(), jitter)
         self.Kbb = add_jitter(self.kernel_B.gram(self.B).as_matrix(), jitter)
-        L_A = cholesky(self.Kaa, lower=True)
-        L_B = cholesky(self.Kbb, lower=True)
-        self.L_11 = jnp.kron(L_A, L_B)
+        L_A = lx.MatrixLinearOperator(cholesky(self.Kaa, lower=True))
+        L_B = lx.MatrixLinearOperator(cholesky(self.Kbb, lower=True))
+        self.L_11 = Kronecker(L_A, L_B)
         self.residual_data = self.compute_data_residual(train_data)
         self.conditioned_on_data = True
 
