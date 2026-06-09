@@ -18,13 +18,39 @@ def solve_triangular(L, b, **kwargs):
     if "trans" in kwargs:
         if kwargs["trans"] == "T":
             L = L.transpose()
-    solver = lx.Normal(lx.GMRES(rtol=1e-9, atol=1e-9))
-    solve = lambda b: lx.linear_solve(L, b, solver).value
     #solve = lambda b: scipy_solve(L.as_matrix(), b, **kwargs)
+    #solver = lx.Normal(lx.GMRES(rtol=1e-9, atol=1e-9))
+    #solve = lambda b: lx.linear_solve(L, b, solver).value
+    solve = lambda b: mv_triangular_solve(L, b)
     if b.ndim == 1:
         return solve(b)
     else: # b.ndim == 2
         return jax.vmap(solve, in_axes=1, out_axes=1)(b)
+
+def mv_triangular_solve(L: lx.AbstractLinearOperator, b):
+    r"""Compute the linear system Lx = b using forward substitution.
+
+    Args:
+        L: Lower triangular linear operator.
+        b: Right-hand side vector.
+
+    Returns:
+        x: Solution of Lx = b.
+    """
+    assert b.ndim == 1
+
+    # Initialize x with zeros
+    n = b.shape[0]
+    x = jnp.zeros_like(b)
+
+    # Forward substitution for lower triangular L
+    def body_fun(i, x):
+        Lx = L.mv(x)
+        x_i = (b[i] - Lx[i] + L.mv(jnp.eye(n)[i])[i] * x[i]) / L.mv(jnp.eye(n)[i])[i]
+        return x.at[i].set(x_i)
+
+    x = jax.lax.fori_loop(0, n, body_fun, x)
+    return x
 
 
 def solve_block_triangular(L11, L21, L22, b1, b2):
