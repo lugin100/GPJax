@@ -18,10 +18,13 @@ def solve_triangular(L, b, **kwargs):
     if "trans" in kwargs:
         if kwargs["trans"] == "T":
             L = L.transpose()
-    solver = lx.Normal(lx.CG(rtol=1e-9, atol=1e-9))
-    B = b if b.ndim == 2 else b[:,None]
+    solver = lx.Normal(lx.GMRES(rtol=1e-9, atol=1e-9))
     solve = lambda b: lx.linear_solve(L, b, solver).value
-    return jax.vmap(solve, in_axes=1, out_axes=1)(B).squeeze(-1)
+    #solve = lambda b: scipy_solve(L.as_matrix(), b, **kwargs)
+    if b.ndim == 1:
+        return solve(b)
+    else: # b.ndim == 2
+        return jax.vmap(solve, in_axes=1, out_axes=1)(b)
 
 
 def solve_block_triangular(L11, L21, L22, b1, b2):
@@ -34,5 +37,5 @@ def solve_block_triangular(L11, L21, L22, b1, b2):
     y2 = solve_triangular(L22, b2 - L21 @ y1, lower=True)
     # Block backward substitution
     x2 = solve_triangular(L22.mT, y2, lower=False)
-    x1 = solve_triangular(L11.transpose(), y1 - L21.T @ x2, lower=False)
+    x1 = solve_triangular(L11.transpose(), y1 - L21.mT @ x2, lower=False)
     return x1, x2
