@@ -172,7 +172,8 @@ def test_solve_triangular_matrix_vector():
 
 
 def test_solve_triangular_matrix_vector_upper():
-    result = solve_triangular(L.mT, b, trans="T")
+    b = L.mT @ x
+    result = solve_triangular(L.mT, b, lower=False)
 
     assert result.shape == x.shape
     assert jnp.allclose(result, x)
