@@ -177,6 +177,13 @@ def test_solve_triangular_matrix_vector_upper():
     assert result.shape == x.shape
     assert jnp.allclose(result, x)
 
+def test_solve_triangular_matrix_matrix():
+    result = solve_triangular(L, B, lower=True)
+
+    assert result.shape == X.shape
+    assert jnp.allclose(result, X)
+
+
 
 # --- Block triangular solve tests ---
 
