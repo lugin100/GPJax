@@ -294,11 +294,11 @@ class SeparablePosterior():
 
         if not self.conditioned_on_functional:
             res = solve_triangular(self.L_11, self.residual_data, lower=True)
-            res = solve_triangular(self.L_11, res, lower=True, trans="T")
+            res = solve_triangular(self.L_11.transpose(), res, lower=False)
             res = K_test_train @ res
 
             X = solve_triangular(self.L_11, K_test_train.as_matrix().mT, lower=True)
-            X = solve_triangular(self.L_11, X, lower=True, trans="T")
+            X = solve_triangular(self.L_11.transpose(), X, lower=False)
             X = K_test_train @ X
 
         else:
