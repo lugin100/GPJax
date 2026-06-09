@@ -190,6 +190,12 @@ def test_solve_triangular_linop_vector():
     assert result.shape == x.shape
     assert jnp.allclose(result, x)
 
+def test_solve_triangular_linop_matrix():
+    linop = lx.MatrixLinearOperator(L)
+    result = solve_triangular(linop, B, lower=True)
+
+    assert result.shape == X.shape
+    assert jnp.allclose(result, X)
 
 # --- Block triangular solve tests ---
 
@@ -213,7 +219,7 @@ def test_solve_block_triangular_vector_rhs():
     b1 = jnp.array([1.0, 2.0])
     b2 = jnp.array([3.0])
     expected = reference_solution(L11, L21, L22, b1, b2)
-
+    L11 = lx.MatrixLinearOperator(L11)
     result = solve_block_triangular(L11, L21, L22, b1, b2)
     result = jnp.concatenate(result, axis=0)
     assert result.shape == expected.shape
@@ -222,12 +228,13 @@ def test_solve_block_triangular_vector_rhs():
 
 def test_solve_block_triangular_matrix_rhs():
     L11 = jnp.array([[3.0, 0.0],[2.0, 4.0]])
+
     L21 = jnp.array([[1.0, -1.0],[0.5, 2.0]])
     L22 = jnp.array([[2.0, 0.0],[1.0, 3.0]])
     b1 = jnp.array([[1.0, 2.0],[3.0, 4.0]])
     b2 = jnp.array([[5.0, 6.0],[7.0, 8.0]])
     expected = reference_solution(L11, L21, L22, b1, b2)
-
+    L11 = lx.MatrixLinearOperator(L11)
     result = solve_block_triangular(L11, L21, L22, b1, b2)
     result = jnp.concatenate(result, axis=0)
     assert result.shape == expected.shape
