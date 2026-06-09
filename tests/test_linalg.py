@@ -4,6 +4,7 @@ from gpjax.linalg import (
     add_jitter,
     cholesky_factor,
     logdet,
+    solve_triangular,
     solve_block_triangular
     )
 from gpjax.linalg.custom_operators import BlockDiag, Kronecker
@@ -154,6 +155,17 @@ def test_kronecker_structures():
     kron = Kronecker(A=A, B=B)
     assert kron.in_structure().shape == (6,)
     assert kron.out_structure().shape == (6,)
+
+
+# --- Triangular solve tests ---
+
+def test_solve_triangular_matrix_vector():
+    L = jnp.array([[2.0, 0.0], [1.0, 3.0]])
+    x = jnp.array([1.0, 2.0])
+    b = L @ x
+    result = solve_triangular(L, b, lower=True)
+    assert result.shape == x.shape
+    assert jnp.allclose(result, x)
 
 
 # --- Block triangular solve tests ---
