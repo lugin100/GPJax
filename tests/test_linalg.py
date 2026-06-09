@@ -4,7 +4,6 @@ from gpjax.linalg import (
     add_jitter,
     cholesky_factor,
     logdet,
-    compute_Kronecker_Cholesky,
     solve_block_triangular
     )
 from gpjax.linalg.custom_operators import BlockDiag, Kronecker
@@ -181,7 +180,7 @@ def test_solve_block_triangular_vector_rhs():
     expected = reference_solution(L11, L21, L22, b1, b2)
 
     result = solve_block_triangular(L11, L21, L22, b1, b2)
-
+    result = jnp.concatenate(result, axis=0)
     assert result.shape == expected.shape
     assert jnp.allclose(result, expected)
 
@@ -195,7 +194,7 @@ def test_solve_block_triangular_matrix_rhs():
     expected = reference_solution(L11, L21, L22, b1, b2)
 
     result = solve_block_triangular(L11, L21, L22, b1, b2)
-
+    result = jnp.concatenate(result, axis=0)
     assert result.shape == expected.shape
     assert jnp.allclose(result, expected)
 
