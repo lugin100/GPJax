@@ -19,10 +19,9 @@ def solve_triangular(L, b, **kwargs):
         if kwargs["trans"] == "T":
             L = L.transpose()
     solver = lx.Normal(lx.CG(rtol=1e-9, atol=1e-9))
-    B = jnp.atleast_2d(b)
-    solve = lambda b: lx.linear_solve(L, b, solver)
-    #solve = lambda b: scipy_solve(L.as_matrix(), b, kwargs)
-    return jax.vmap(solve, in_axes=1, out_axes=1)(B)
+    B = b if b.ndim == 2 else b[:,None]
+    solve = lambda b: lx.linear_solve(L, b, solver).value
+    return jax.vmap(solve, in_axes=1, out_axes=1)(B).squeeze(-1)
 
 
 def solve_block_triangular(L11, L21, L22, b1, b2):

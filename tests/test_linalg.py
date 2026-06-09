@@ -183,6 +183,12 @@ def test_solve_triangular_matrix_matrix():
     assert result.shape == X.shape
     assert jnp.allclose(result, X)
 
+def test_solve_triangular_linop_vector():
+    linop = lx.MatrixLinearOperator(L)
+    result = solve_triangular(linop, b, lower=True)
+
+    assert result.shape == x.shape
+    assert jnp.allclose(result, x)
 
 
 # --- Block triangular solve tests ---
