@@ -158,12 +158,22 @@ def test_kronecker_structures():
 
 
 # --- Triangular solve tests ---
+L = jnp.array([[2.0, 0.0], [1.0, 3.0]])
+x = jnp.array([1.0, 2.0])
+b = L @ x
+X = jnp.array([[1.0, 2.0], [3.0, 4.0]])
+B = L @ X
 
 def test_solve_triangular_matrix_vector():
-    L = jnp.array([[2.0, 0.0], [1.0, 3.0]])
-    x = jnp.array([1.0, 2.0])
-    b = L @ x
     result = solve_triangular(L, b, lower=True)
+
+    assert result.shape == x.shape
+    assert jnp.allclose(result, x)
+
+
+def test_solve_triangular_matrix_vector_upper():
+    result = solve_triangular(L.mT, b, trans="T")
+
     assert result.shape == x.shape
     assert jnp.allclose(result, x)
 
