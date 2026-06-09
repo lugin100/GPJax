@@ -3,54 +3,80 @@ from jax import numpy as jnp
 from jax.scipy.linalg import solve_triangular as scipy_solve
 import lineax as lx
 
-def solve_triangular(L, b, **kwargs):
+def solve_triangular(L, b, lower=True):
     r"""Compute the linear system Lx = b.
         Args:
             L: Linear Operator
             b: Right hand side, may be a matrix interpreted as batch of vectors.
-            kwargs: keyword arguments to be passed to the solver
+            lower:  If True, L is assumed to be lower triangular (default). 
+                    If False, L is assumed to be upper triangular
         Returns:
             x: Solution of Lx = b
     """
     if isinstance(L, jax.Array):
-        return scipy_solve(L, b, **kwargs)
+        return scipy_solve(L, b, lower=lower, trans="N")
 
-    if "trans" in kwargs:
-        if kwargs["trans"] == "T":
-            L = L.transpose()
     #solve = lambda b: scipy_solve(L.as_matrix(), b, **kwargs)
     #solver = lx.Normal(lx.GMRES(rtol=1e-9, atol=1e-9))
     #solve = lambda b: lx.linear_solve(L, b, solver).value
-    solve = lambda b: mv_triangular_solve(L, b)
+    solve = lambda b: mv_triangular_solve(L, b, lower)
     if b.ndim == 1:
         return solve(b)
     else: # b.ndim == 2
         return jax.vmap(solve, in_axes=1, out_axes=1)(b)
 
-def mv_triangular_solve(L: lx.AbstractLinearOperator, b):
-    r"""Compute the linear system Lx = b using forward substitution.
+def mv_triangular_solve(L: lx.AbstractLinearOperator, b, lower):
+    r"""Compute the linear system Lx = b using forward or backward substitution.
 
     Args:
-        L: Lower triangular linear operator.
+        L: Triangular linear operator.
         b: Right-hand side vector.
-
+        lower: Whether L is lower or upper triangular.
     Returns:
         x: Solution of Lx = b.
     """
-    assert b.ndim == 1
-
-    # Initialize x with zeros
+    b = jnp.asarray(b)
     n = b.shape[0]
-    x = jnp.zeros_like(b)
 
-    # Forward substitution for lower triangular L
-    def body_fun(i, x):
-        Lx = L.mv(x)
-        x_i = (b[i] - Lx[i] + L.mv(jnp.eye(n)[i])[i] * x[i]) / L.mv(jnp.eye(n)[i])[i]
-        return x.at[i].set(x_i)
+    # Cache columns of L as they are requested.
+    def column(j):
+        e = jax.nn.one_hot(j, n, dtype=b.dtype)
+        return L.mv(e)
 
-    x = jax.lax.fori_loop(0, n, body_fun, x)
-    return x
+    if lower:
+        def body(i, x):
+            # Compute sum_{j < i} L[i, j] * x[j]
+            rhs = b[i]
+
+            def accum(j, val):
+                col_j = column(j)
+                return val - col_j[i] * x[j]
+
+            rhs = jax.lax.fori_loop(0, i, accum, rhs)
+
+            diag = column(i)[i]
+            return x.at[i].set(rhs / diag)
+
+        x0 = jnp.zeros_like(b)
+        return jax.lax.fori_loop(0, n, body, x0)
+
+    else:
+        def body(k, x):
+            i = n - 1 - k
+
+            rhs = b[i]
+
+            def accum(j, val):
+                col_j = column(j)
+                return val - col_j[i] * x[j]
+
+            rhs = jax.lax.fori_loop(i + 1, n, accum, rhs)
+
+            diag = column(i)[i]
+            return x.at[i].set(rhs / diag)
+
+        x0 = jnp.zeros_like(b)
+        return jax.lax.fori_loop(0, n, body, x0)
 
 
 def solve_block_triangular(L11, L21, L22, b1, b2):
