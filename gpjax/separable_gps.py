@@ -309,7 +309,7 @@ class SeparablePosterior():
 
             LkL = jax.vmap(lambda i: self.functional(lambda x: kL(x)[i]))(jnp.arange(self.y_functional.shape[0]))
             LkLZ = jnp.kron(Katat.as_matrix(), LkL)
-            
+
             L_21 = solve_triangular(self.L_11, kLZ, lower=True).mT
             S = LkLZ - L_21 @ L_21.mT
             S = add_jitter(S, jitter)

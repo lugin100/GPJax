@@ -38,45 +38,26 @@ def mv_triangular_solve(L: lx.AbstractLinearOperator, b, lower):
     b = jnp.asarray(b)
     n = b.shape[0]
 
-    # Cache columns of L as they are requested.
-    def column(j):
-        e = jax.nn.one_hot(j, n, dtype=b.dtype)
-        return L.mv(e)
+    def row(i):
+        e = jax.nn.one_hot(i, n, dtype=b.dtype)
+        return L.transpose().mv(e)
+
+    def body(m, x):
+            rhs = b[m]
+            row_m = row(m)
+            rhs = rhs - jnp.dot(row_m, x)
+            diag = row_m[m]
+            return x.at[m].set(rhs / diag)
+    x0 = jnp.zeros_like(b)
 
     if lower:
-        def body(i, x):
-            # Compute sum_{j < i} L[i, j] * x[j]
-            rhs = b[i]
-
-            def accum(j, val):
-                col_j = column(j)
-                return val - col_j[i] * x[j]
-
-            rhs = jax.lax.fori_loop(0, i, accum, rhs)
-
-            diag = column(i)[i]
-            return x.at[i].set(rhs / diag)
-
-        x0 = jnp.zeros_like(b)
         return jax.lax.fori_loop(0, n, body, x0)
-
     else:
-        def body(k, x):
-            i = n - 1 - k
+        def reverse_body(k, x):
+            m = n - 1 - k
+            return body(m, x)
 
-            rhs = b[i]
-
-            def accum(j, val):
-                col_j = column(j)
-                return val - col_j[i] * x[j]
-
-            rhs = jax.lax.fori_loop(i + 1, n, accum, rhs)
-
-            diag = column(i)[i]
-            return x.at[i].set(rhs / diag)
-
-        x0 = jnp.zeros_like(b)
-        return jax.lax.fori_loop(0, n, body, x0)
+        return jax.lax.fori_loop(0, n, reverse_body, x0)
 
 
 def solve_block_triangular(L11, L21, L22, b1, b2):
