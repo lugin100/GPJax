@@ -83,6 +83,17 @@ class Kronecker(lx.AbstractLinearOperator):
         dtype = self.A.out_structure().dtype
         return jax.ShapeDtypeStruct((na * nb,), dtype)
 
+    def linear_solve(self, b):
+        r"""Solve the linear system Lx = b."""
+
+        m = self.A.in_structure.shape[0]
+        n = self.B.in_structure.shape[0]
+        Y = jnp.reshape(y, (n,m), order="F")
+        Z = self.B.linear_solve(Y)
+        X = self.A.linear_solve(Z.mT).mT
+        return X.reshape((-1,), order="F")
+
+
 # Register tag queries for custom operators.
 # Lineax uses singledispatch for is_symmetric, is_diagonal, etc.
 # These must be registered so __check_init__ can run.
