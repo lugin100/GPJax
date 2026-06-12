@@ -16,10 +16,9 @@ def solve_triangular(L, b, lower=True):
     if isinstance(L, jax.Array):
         return scipy_solve(L, b, lower=lower, trans="N")
 
-    #solve = lambda b: scipy_solve(L.as_matrix(), b, **kwargs)
-    #solver = lx.Normal(lx.GMRES(rtol=1e-9, atol=1e-9))
-    #solve = lambda b: lx.linear_solve(L, b, solver).value
-    solve = lambda b: mv_triangular_solve(L, b, lower)
+    solver = lx.Kronecker()
+    state = solver.init(L)
+    solve = lambda b: lx.linear_solve(L, b, solver, state=state).value
     if b.ndim == 1:
         return solve(b)
     else: # b.ndim == 2
