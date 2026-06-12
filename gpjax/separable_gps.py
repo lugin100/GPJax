@@ -16,7 +16,6 @@ from gpjax.distributions import GaussianDistribution
 from gpjax.likelihoods import AbstractLikelihood, Gaussian
 from gpjax.gps import AbstractPrior, AbstractPosterior
 from gpjax.linalg import add_jitter, solve_block_triangular, solve_triangular
-from gpjax.linalg.custom_operators import Kronecker
 
 L = tp.TypeVar("L", bound=AbstractLikelihood)
 G = tp.TypeVar("G", bound=Gaussian)
@@ -85,7 +84,7 @@ class SeparablePrior(eqx.Module):
     def full_gram(self, A, B):
         gram_A = self.prior_A.kernel.gram(A)
         gram_B = self.prior_B.kernel.gram(B)
-        return Kronecker(gram_A, gram_B)
+        return lx.KroneckerLinearOperator(gram_A, gram_B)
 
 
     def predict(
@@ -118,7 +117,7 @@ class SeparablePrior(eqx.Module):
         def _return_full_covariance(t_A, t_B):
             Kaa = self.prior_A.kernel.gram(t_A)
             Kbb = self.prior_B.kernel.gram(t_B)
-            return Kronecker(Kaa, Kbb) + jitterOperator
+            return lx.KroneckerLinearOperator(Kaa, Kbb) + jitterOperator
 
         def _return_diagonal_covariance(t_A, t_B):
         	Kaa = self.prior_A.kernel.diagonal(t_A)
@@ -223,7 +222,9 @@ class SeparablePosterior():
         self.Kbb = add_jitter(self.kernel_B.gram(self.B).as_matrix(), jitter)
         L_A = lx.MatrixLinearOperator(cholesky(self.Kaa, lower=True))
         L_B = lx.MatrixLinearOperator(cholesky(self.Kbb, lower=True))
-        self.L_11 = Kronecker(L_A, L_B)
+        L_A = lx.TaggedLinearOperator(L_A, lx.lower_triangular_tag)
+        L_B = lx.TaggedLinearOperator(L_B, lx.lower_triangular_tag)
+        self.L_11 = lx.KroneckerLinearOperator(L_A, L_B)
         self.residual_data = self.compute_data_residual(train_data)
         self.conditioned_on_data = True
 
@@ -280,7 +281,7 @@ class SeparablePosterior():
         # Compute K_test_train
         Kata = self.kernel_A.cross_covariance(test_inputs_A, self.A)
         Kbtb = self.kernel_B.cross_covariance(test_inputs_B, self.B)
-        K_test_train = Kronecker(lx.MatrixLinearOperator(Kata), lx.MatrixLinearOperator(Kbtb))
+        K_test_train = lx.KroneckerLinearOperator(lx.MatrixLinearOperator(Kata), lx.MatrixLinearOperator(Kbtb))
 
         # Compute prior mean
         mean_A_test = self.mean_function_A(test_inputs_A)
@@ -290,11 +291,16 @@ class SeparablePosterior():
         # Compute prior covariance
         Katat = add_jitter(self.kernel_A.gram(test_inputs_A), jitter)
         Kbtbt = add_jitter(self.kernel_B.gram(test_inputs_B), jitter)
-        prior_cov = Kronecker(Katat, Kbtbt)
+        prior_cov = lx.KroneckerLinearOperator(Katat, Kbtbt)
 
         if not self.conditioned_on_functional:
             res = solve_triangular(self.L_11, self.residual_data, lower=True)
             res = solve_triangular(self.L_11.transpose(), res, lower=False)
+            print(K_test_train.operator1.in_structure())
+            print(K_test_train.operator1.out_structure())
+            print(K_test_train.operator2.in_structure())
+            print(K_test_train.operator2.out_structure())
+            print(res.shape)
             res = K_test_train @ res
 
             X = solve_triangular(self.L_11, K_test_train.as_matrix().mT, lower=True)
@@ -318,7 +324,7 @@ class SeparablePosterior():
             new_y = jnp.kron(jnp.ones((test_inputs_A.shape[0],1)), self.y_functional)
             mLZ = jnp.kron(self.mean_function_A(test_inputs_A), self.functional(lambda x: self.mean_function_B(jnp.atleast_2d(x)).squeeze())[:,None])
             residual_functional = new_y - mLZ
-            K_test_functional = Kronecker(Katat, lx.MatrixLinearOperator(kLBt))
+            K_test_functional = lx.KroneckerLinearOperator(Katat, lx.MatrixLinearOperator(kLBt))
 
             blocks = solve_block_triangular(self.L_11, L_21, L_22, self.residual_data, residual_functional)
             res = K_test_train @ blocks[0] + K_test_functional @ blocks[1]
