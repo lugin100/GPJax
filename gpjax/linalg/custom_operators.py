@@ -4,6 +4,7 @@ import jax
 import jax.numpy as jnp
 import lineax as lx
 
+
 class BlockDiag(lx.AbstractLinearOperator):
     """Block diagonal linear operator."""
 
@@ -59,12 +60,6 @@ class Kronecker(lx.AbstractLinearOperator):
         AXBt = jax.vmap(self.B.mv, in_axes=0, out_axes=0)(AX)
         return AXBt.ravel()
 
-    def __matmul__(self, other):
-        if isinstance(other, Kronecker):
-            # mixed product formula
-            return Kronecker(self.A @ other.A, self.B @ other.B)
-        return jax.vmap(self.mv, in_axes=1, out_axes=1)(other)
-
     def as_matrix(self):
         return jnp.kron(self.A.as_matrix(), self.B.as_matrix())
 
@@ -82,16 +77,6 @@ class Kronecker(lx.AbstractLinearOperator):
         nb = self.B.out_structure().shape[0]
         dtype = self.A.out_structure().dtype
         return jax.ShapeDtypeStruct((na * nb,), dtype)
-
-    def linear_solve(self, b):
-        r"""Solve the linear system Lx = b."""
-
-        m = self.A.in_structure.shape[0]
-        n = self.B.in_structure.shape[0]
-        Y = jnp.reshape(y, (n,m), order="F")
-        Z = self.B.linear_solve(Y)
-        X = self.A.linear_solve(Z.mT).mT
-        return X.reshape((-1,), order="F")
 
 
 # Register tag queries for custom operators.
@@ -167,17 +152,3 @@ def _is_nsd_blockdiag(op):
 @lx.is_negative_semidefinite.register(Kronecker)
 def _is_nsd_kronecker(op):
     return False
-
-
-@lx.diagonal.register(Kronecker)
-def diagonal_kronecker(op):
-    return jnp.kron(lx.diagonal(op.A), lx.diagonal(op.B))
-
-@lx.conj.register(Kronecker)
-def conj_kronecker(op):
-    return Kronecker(lx.conj(op.A), lx.conj(op.B))
-
-@lx.linearise.register(Kronecker)
-def linearise_kronecker(op):
-    return op # already linear
-
