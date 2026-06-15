@@ -3,37 +3,40 @@ from jax import numpy as jnp
 from jax.scipy.linalg import solve_triangular as scipy_solve
 import lineax as lx
 
-def solve_triangular(L, b, lower=True):
-    r"""Compute the linear system Lx = b.
+def generate_solver(L):
+    r"""Given a Kronecker linear operator, 
+    returns a callable mapping a vector (or matrix) b to the solution of Lx=b.
         Args:
             L: Linear Operator
-            b: Right hand side, may be a matrix interpreted as batch of vectors.
-            lower:  If True, L is assumed to be lower triangular (default). 
-                    If False, L is assumed to be upper triangular
-        Returns:
-            x: Solution of Lx = b
     """
-    if isinstance(L, jax.Array):
-        return scipy_solve(L, b, lower=lower, trans="N")
-
-    solver = lx.Kronecker()
-    state = solver.init(L)
+    if isinstance(L, lx.KroneckerLinearOperator):
+        solver = lx.Kronecker()
+    else:
+        solver = lx.AutoLinearSolver(well_posed=True)
+    state = solver.init(L, options={})
     solve = lambda b: lx.linear_solve(L, b, solver, state=state).value
-    if b.ndim == 1:
-        return solve(b)
-    else: # b.ndim == 2
-        return jax.vmap(solve, in_axes=1, out_axes=1)(b)
+    state_T, _ = solver.transpose(state, {})
+    solve_T = lambda b: lx.linear_solve(L, b, solver, state=state_T).value
+
+    def solve_with_L(B, transpose=False):
+        solve_fn = solve_T if transpose else solve
+        if B.ndim == 1:
+            return solve_fn(B)
+        else: # b.ndim == 2
+            return jax.vmap(solve_fn, in_axes=1, out_axes=1)(B)
+
+    return solve_with_L
 
 
-def solve_block_triangular(L11, L21, L22, b1, b2):
+def solve_block_triangular(solve_L11, L21, solve_L22, b1, b2):
     r"""Compute $(L L^T)^{-1} b$ where 
     $L$ is assumed to be a lower-triangular block matrix
     $L = [[L11, 0], [L21, L22]]$ and b is a vector or matrix $[[b1, b2]]$.
     """
     # Block forward substitution
-    y1 = solve_triangular(L11, b1, lower=True)
-    y2 = solve_triangular(L22, b2 - L21 @ y1, lower=True)
+    y1 = solve_L11(b1)
+    y2 = solve_L22(b2 - L21 @ y1)
     # Block backward substitution
-    x2 = solve_triangular(L22.mT, y2, lower=False)
-    x1 = solve_triangular(L11.transpose(), y1 - L21.mT @ x2, lower=False)
+    x2 = solve_L22(y2, transpose=True)
+    x1 = solve_L11(y1 - L21.mT @ x2, transpose=True)
     return x1, x2

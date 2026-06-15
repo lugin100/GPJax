@@ -2,7 +2,7 @@
 
 from gpjax.linalg.custom_operators import BlockDiag, Kronecker
 from gpjax.linalg.utils import add_jitter, cholesky_factor, logdet
-from gpjax.linalg.computations import solve_block_triangular, solve_triangular
+from gpjax.linalg.computations import solve_block_triangular, generate_solver
 
 __all__ = [
     "BlockDiag",
@@ -11,5 +11,5 @@ __all__ = [
     "cholesky_factor",
     "logdet",
     "solve_block_triangular",
-    "solve_triangular"
+    "generate_solver"
 ]

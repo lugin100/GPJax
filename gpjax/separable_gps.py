@@ -15,7 +15,7 @@ import lineax as lx
 from gpjax.distributions import GaussianDistribution
 from gpjax.likelihoods import AbstractLikelihood, Gaussian
 from gpjax.gps import AbstractPrior, AbstractPosterior
-from gpjax.linalg import add_jitter, solve_block_triangular, solve_triangular
+from gpjax.linalg import add_jitter, solve_block_triangular, generate_solver
 
 L = tp.TypeVar("L", bound=AbstractLikelihood)
 G = tp.TypeVar("G", bound=Gaussian)
@@ -225,6 +225,8 @@ class SeparablePosterior():
         L_A = lx.TaggedLinearOperator(L_A, lx.lower_triangular_tag)
         L_B = lx.TaggedLinearOperator(L_B, lx.lower_triangular_tag)
         self.L_11 = lx.KroneckerLinearOperator(L_A, L_B)
+        solver = lx.Kronecker()
+        self.solve_with_L11 = generate_solver(self.L_11)
         self.residual_data = self.compute_data_residual(train_data)
         self.conditioned_on_data = True
 
@@ -294,12 +296,12 @@ class SeparablePosterior():
         prior_cov = lx.KroneckerLinearOperator(Katat, Kbtbt)
 
         if not self.conditioned_on_functional:
-            res = solve_triangular(self.L_11, self.residual_data, lower=True)
-            res = solve_triangular(self.L_11.transpose(), res, lower=False)
+            res = self.solve_with_L11(self.residual_data)
+            res = self.solve_with_L11(res, transpose=True)
             res = K_test_train @ res
 
-            X = solve_triangular(self.L_11, K_test_train.as_matrix().mT, lower=True)
-            X = solve_triangular(self.L_11.transpose(), X, lower=False)
+            X = self.solve_with_L11(K_test_train.as_matrix().mT)
+            X = self.solve_with_L11(X, transpose=True)
             X = K_test_train @ X
 
         else:
@@ -311,20 +313,21 @@ class SeparablePosterior():
             LkL = jax.vmap(lambda i: self.functional(lambda x: kL(x)[i]))(jnp.arange(self.y_functional.shape[0]))
             LkLZ = jnp.kron(Katat.as_matrix(), LkL)
 
-            L_21 = solve_triangular(self.L_11, kLZ, lower=True).mT
+            L_21 = self.solve_with_L11(kLZ).mT
             S = LkLZ - L_21 @ L_21.mT
             S = add_jitter(S, jitter)
             L_22 = cholesky(S, lower=True)
-
+            L_22 = lx.MatrixLinearOperator(L_22, lx.symmetric_tag)
+            solve_with_L22 = generate_solver(L_22)
             new_y = jnp.kron(jnp.ones((test_inputs_A.shape[0],1)), self.y_functional)
             mLZ = jnp.kron(self.mean_function_A(test_inputs_A), self.functional(lambda x: self.mean_function_B(jnp.atleast_2d(x)).squeeze())[:,None])
             residual_functional = new_y - mLZ
             K_test_functional = lx.KroneckerLinearOperator(Katat, lx.MatrixLinearOperator(kLBt))
 
-            blocks = solve_block_triangular(self.L_11, L_21, L_22, self.residual_data, residual_functional)
+            blocks = solve_block_triangular(self.solve_with_L11, L_21, solve_with_L22, self.residual_data, residual_functional)
             res = K_test_train @ blocks[0] + K_test_functional @ blocks[1]
 
-            blocks = solve_block_triangular(self.L_11, L_21, L_22, K_test_train.as_matrix().mT, K_test_functional.as_matrix().mT)
+            blocks = solve_block_triangular(self.solve_with_L11, L_21, solve_with_L22, K_test_train.as_matrix().mT, K_test_functional.as_matrix().mT)
             X = K_test_train @ blocks[0] + K_test_functional @ blocks[1]
 
         mean = prior_mean[:,None] + res
