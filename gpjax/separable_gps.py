@@ -230,7 +230,7 @@ class SeparablePosterior():
 
 
     def compute_data_residual(self, train_data):
-        r"""Diffrence between training targets and prior mean evaluated at training points."""
+        r"""Difference between training targets and prior mean evaluated at training points."""
         prior_pred = jnp.kron(self.mean_function_A(train_data.A), self.mean_function_B(train_data.B))
         return train_data.y - prior_pred
 
