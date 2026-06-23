@@ -24,7 +24,7 @@ import optax as ox
 import paramax
 from scipy.optimize import minimize
 
-from gpjax.dataset import Dataset
+from gpjax.dataset import Dataset, SeparableDataset
 from gpjax.objectives import Objective
 from gpjax.scan import vscan
 from gpjax.typing import (
@@ -402,12 +402,25 @@ def get_batch(train_data: Dataset, batch_size: int, key: KeyArray) -> Dataset:
     Dataset
         The batched dataset.
     """
+    if isinstance(train_data, SeparableDataset):
+        return get_batch_separable_dataset(train_data, batch_size, key)
+
     x, y, n = train_data.X, train_data.y, train_data.n
 
     # Subsample mini-batch indices with replacement.
     indices = jr.choice(key, n, (batch_size,), replace=True)
 
     return Dataset(X=x[indices], y=y[indices])
+
+
+def get_batch_separable_dataset(train_data: SeparableDataset, batch_size: int, key: KeyArray) -> SeparableDataset:
+    A, B, y = train_data.A, train_data.B, train_data.y
+    n_A, n_B = len(A), len(B)
+    indices_A = jr.choice(key, n, (batch_size,), replace=True)
+    A_samples = A[indices_A]
+    indices_y = jnp.repeat(idx_a, n_b) + jnp.arange(n_b)
+    y_samples = y[indices_y]
+    return SeparableDataet(A_samples, B, y_samples)
 
 
 def _check_model(model: tp.Any) -> None:
