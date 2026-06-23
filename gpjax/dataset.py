@@ -114,8 +114,11 @@ class SeparableDataset(Dataset):
         self.A = A
         self.B = B
         self.y = y
-        X = cartesian_concatenation(A,B)
-        super().__init__(X=X, y=y)
+
+    @property
+    def n(self) -> int:
+        r"""Number of observations."""
+        return self.y.shape[0]
 
 
 def cartesian_concatenation(A, B):
