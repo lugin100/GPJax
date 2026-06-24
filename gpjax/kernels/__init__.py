@@ -56,6 +56,8 @@ from gpjax.kernels.stationary import (
     White,
 )
 
+from gpjax.kernels.deep import DeepKernelFunction
+
 __all__ = [
     "RBF",
     "RFF",
@@ -85,4 +87,5 @@ __all__ = [
     "SumKernel",
     "White",
     "stationary",
+    "DeepKernelFunction",
 ]
