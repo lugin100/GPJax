@@ -29,14 +29,10 @@ def generate_solver(L):
 
 
 def solve_block_triangular(solve_L11, L21, solve_L22, b1, b2):
-    r"""Compute $(L L^T)^{-1} b$ where 
+    r"""Compute $L^{-1} b$ where 
     $L$ is assumed to be a lower-triangular block matrix
     $L = [[L11, 0], [L21, L22]]$ and b is a vector or matrix $[[b1, b2]]$.
     """
-    # Block forward substitution
-    y1 = solve_L11(b1)
-    y2 = solve_L22(b2 - L21 @ y1)
-    # Block backward substitution
-    x2 = solve_L22(y2, transpose=True)
-    x1 = solve_L11(y1 - L21.mT @ x2, transpose=True)
+    x1 = solve_L11(b1)
+    x2 = solve_L22(b2 - L21 @ x1)
     return x1, x2

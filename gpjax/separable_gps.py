@@ -278,7 +278,11 @@ class SeparablePosterior():
         """
         if not self.conditioned_on_data:
             raise ValueError("Can not predict on posterior that has not been conditioned on data. Use prior.predict() instead.")
+        
+        # TODO: What about noise?
         #noise = self.likelihood.noise_vector(train_data.n)
+
+        # TODO: Sanitize return_covariance_type argument
 
         # Compute K_test_train
         Kata = self.kernel_A.cross_covariance(test_inputs_A, self.A)
@@ -291,18 +295,26 @@ class SeparablePosterior():
         prior_mean = jnp.kron(mean_A_test, mean_B_test).squeeze()
 
         # Compute prior covariance
-        Katat = add_jitter(self.kernel_A.gram(test_inputs_A), jitter)
-        Kbtbt = add_jitter(self.kernel_B.gram(test_inputs_B), jitter)
+        if return_covariance_type == "dense":
+            Katat = add_jitter(self.kernel_A.gram(test_inputs_A), jitter)
+            Kbtbt = add_jitter(self.kernel_B.gram(test_inputs_B), jitter)
+        else:
+            Katat = add_jitter(self.kernel_A.diagonal(test_inputs_A), jitter)
+            Kbtbt = add_jitter(self.kernel_B.diagonal(test_inputs_B), jitter)
         prior_cov = lx.KroneckerLinearOperator(Katat, Kbtbt)
 
         if not self.conditioned_on_functional:
-            res = self.solve_with_L11(self.residual_data)
-            res = self.solve_with_L11(res, transpose=True)
-            res = K_test_train @ res
+            L_inv_res = self.solve_with_L11(self.residual_data)
+            L_inv_K_train_test = self.solve_with_L11(K_test_train.as_matrix().mT)
+            mean_update = L_inv_K_train_test.mT @ L_inv_res
 
-            X = self.solve_with_L11(K_test_train.as_matrix().mT)
-            X = self.solve_with_L11(X, transpose=True)
-            X = K_test_train @ X
+
+            if return_covariance_type == "dense":
+                cov_update = L_inv_K_train_test.mT @ L_inv_K_train_test
+                cov_update = lx.MatrixLinearOperator(cov_update)
+            else:
+                cov_update = jnp.einsum("ij, ji->i", L_inv_K_train_test.mT, L_inv_K_train_test)
+                cov_update = lx.DiagonalLinearOperator(cov_update)
 
         else:
             kL = lambda b: self.functional(lambda b_prime: self.kernel_B(b, b_prime))
@@ -311,6 +323,7 @@ class SeparablePosterior():
             kLZ = jnp.kron(Kata.mT, kLB)
 
             LkL = jax.vmap(lambda i: self.functional(lambda x: kL(x)[i]))(jnp.arange(self.y_functional.shape[0]))
+            Katat = add_jitter(self.kernel_A.gram(test_inputs_A), jitter)
             LkLZ = jnp.kron(Katat.as_matrix(), LkL)
 
             L_21 = self.solve_with_L11(kLZ).mT
@@ -324,16 +337,20 @@ class SeparablePosterior():
             residual_functional = new_y - mLZ
             K_test_functional = lx.KroneckerLinearOperator(Katat, lx.MatrixLinearOperator(kLBt))
 
-            blocks = solve_block_triangular(self.solve_with_L11, L_21, solve_with_L22, self.residual_data, residual_functional)
-            res = K_test_train @ blocks[0] + K_test_functional @ blocks[1]
+            L_inv_res = solve_block_triangular(self.solve_with_L11, L_21, solve_with_L22, self.residual_data, residual_functional)
+            L_inv_K_train_test = solve_block_triangular(self.solve_with_L11, L_21, solve_with_L22, K_test_train.as_matrix().mT, K_test_functional.as_matrix().mT)
 
-            blocks = solve_block_triangular(self.solve_with_L11, L_21, solve_with_L22, K_test_train.as_matrix().mT, K_test_functional.as_matrix().mT)
-            X = K_test_train @ blocks[0] + K_test_functional @ blocks[1]
+            mean_update = L_inv_K_train_test[0].mT @ L_inv_res[0] + L_inv_K_train_test[1].mT @ L_inv_res[1]
 
-        mean = prior_mean[:,None] + res
+            if return_covariance_type == "dense":
+                cov_update = L_inv_K_train_test[0].mT @ L_inv_K_train_test[0] + L_inv_K_train_test[1].mT @ L_inv_K_train_test[1]
+                cov_update = lx.MatrixLinearOperator(cov_update)
+            else:
+                cov_update = jnp.einsum("ij, ji->i", L_inv_K_train_test[0].mT, L_inv_K_train_test[0]) + jnp.einsum("ij, ji->i", L_inv_K_train_test[1].mT, L_inv_K_train_test[1])
+                cov_update = lx.DiagonalLinearOperator(cov_update)
 
-        X = lx.MatrixLinearOperator(X)
-        cov = prior_cov - X
+        mean = prior_mean[:,None] + mean_update
+        cov = prior_cov - cov_update
 
         return GaussianDistribution(loc=jnp.atleast_1d(mean.squeeze()), scale=cov)
 
