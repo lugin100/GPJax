@@ -284,6 +284,13 @@ class SeparablePosterior():
 
         # TODO: Sanitize return_covariance_type argument
 
+        # TODO: Compute Katat Gram matrix first
+        #       Use it to compute LkLZ
+        #       Compute prior_mean, prior_cov after cov_update
+        #       Reuse Katat for prior_cov, take diagonal if applicable
+
+        # TODO: Optionally cache LkB, LkL
+        
         # Compute K_test_train
         Kata = self.kernel_A.cross_covariance(test_inputs_A, self.A)
         Kbtb = self.kernel_B.cross_covariance(test_inputs_B, self.B)
