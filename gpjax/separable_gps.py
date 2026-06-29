@@ -263,6 +263,7 @@ class SeparablePosterior():
         jitter = 1e-6,
         *,
         return_covariance_type: Literal["dense", "diagonal"] = "dense",
+        use_cached_functionals: bool = False,
     ) -> GaussianDistribution:
         r"""Infer the posterior distribution at given inputs,
             taking all previous conditionings into account.
@@ -272,7 +273,8 @@ class SeparablePosterior():
             test_inputs_B: Where to infer on domain B.
             jitter (float): A small constant added to the diagonal of the
                 covariance matrix to ensure numerical stability.
-
+            use_cached_functionals: Indicate that functionals have not changed since last inference call,
+                                    meaning cached computation can be used
         Returns:
             Gaussian distribution over values at test_inputs.
         """
@@ -282,8 +284,6 @@ class SeparablePosterior():
         # TODO: What about noise?
         #noise = self.likelihood.noise_vector(train_data.n)
 
-
-        # TODO: Optionally cache LkB, LkL
 
         # Used for LkLZ and prior_cov
         self.Katat = add_jitter(self.kernel_A.gram(test_inputs_A), jitter)
@@ -302,9 +302,10 @@ class SeparablePosterior():
         if not self.conditioned_on_functional:
             L_inv_res = self.solve_with_L11(self.residual_data)
             L_inv_K_train_test = self.solve_with_L11(K_test_train.as_matrix().mT)
+            
             mean_update = L_inv_K_train_test.mT @ L_inv_res
 
-            if return_covariance_type == "dense":
+            if dense:
                 cov_update = L_inv_K_train_test.mT @ L_inv_K_train_test
                 cov_update = lx.MatrixLinearOperator(cov_update)
             else:
@@ -312,12 +313,11 @@ class SeparablePosterior():
                 cov_update = lx.DiagonalLinearOperator(cov_update)
 
         else:
-            kL = lambda b: self.functional(lambda b_prime: self.kernel_B(b, b_prime))
-            kLB = jax.vmap(kL)(self.B)
+
+            self.kLB, self.LkL = compute_functional_matrices(use_cached_functionals)
             kLBt = jax.vmap(kL)(test_inputs_B)
             kLZ = jnp.kron(Kata.mT, kLB)
 
-            LkL = jax.vmap(lambda i: self.functional(lambda x: kL(x)[i]))(jnp.arange(self.y_functional.shape[0]))
             LkLZ = jnp.kron(self.Katat.as_matrix(), LkL)
 
             L_21 = self.solve_with_L11(kLZ).mT
@@ -348,6 +348,15 @@ class SeparablePosterior():
 
         return GaussianDistribution(loc=jnp.atleast_1d(mean.squeeze()), scale=cov)
 
+    def compute_functional_matrices(use_cached_functionals):
+        if use_cached_functionals:
+            if self.LkL is not None and self.kLB is not None:
+                return self.kLB, self.LkL
+        # else recompute
+        kL = lambda b: self.functional(lambda b_prime: self.kernel_B(b, b_prime))
+        kLB = jax.vmap(kL)(self.B)
+        LkL = jax.vmap(lambda i: self.functional(lambda x: kL(x)[i]))(jnp.arange(self.y_functional.shape[0]))
+        return kLB, LkL
 
     def prior_mean(self, A_test, B_test):
         mean_A = self.mean_function_A(A_test)
