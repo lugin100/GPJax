@@ -287,12 +287,14 @@ class SeparablePosterior():
         # TODO: Optionally cache LkB, LkL
 
         # Used for LkLZ and prior_cov
-        Katat = add_jitter(self.kernel_A.gram(test_inputs_A), jitter)
+        self.Katat = add_jitter(self.kernel_A.gram(test_inputs_A), jitter)
 
         # Compute K_test_train
         Kata = self.kernel_A.cross_covariance(test_inputs_A, self.A)
         Kbtb = self.kernel_B.cross_covariance(test_inputs_B, self.B)
         K_test_train = lx.KroneckerLinearOperator(lx.MatrixLinearOperator(Kata), lx.MatrixLinearOperator(Kbtb))
+
+        dense = True if return_covariance_type == "dense" else False
 
         if not self.conditioned_on_functional:
             L_inv_res = self.solve_with_L11(self.residual_data)
@@ -314,7 +316,7 @@ class SeparablePosterior():
             kLZ = jnp.kron(Kata.mT, kLB)
 
             LkL = jax.vmap(lambda i: self.functional(lambda x: kL(x)[i]))(jnp.arange(self.y_functional.shape[0]))
-            LkLZ = jnp.kron(Katat.as_matrix(), LkL)
+            LkLZ = jnp.kron(self.Katat.as_matrix(), LkL)
 
             L_21 = self.solve_with_L11(kLZ).mT
             S = LkLZ - L_21 @ L_21.mT
@@ -332,31 +334,37 @@ class SeparablePosterior():
 
             mean_update = L_inv_K_train_test[0].mT @ L_inv_res[0] + L_inv_K_train_test[1].mT @ L_inv_res[1]
 
-            if return_covariance_type == "dense":
+            if dense:
                 cov_update = L_inv_K_train_test[0].mT @ L_inv_K_train_test[0] + L_inv_K_train_test[1].mT @ L_inv_K_train_test[1]
                 cov_update = lx.MatrixLinearOperator(cov_update)
             else:
                 cov_update = jnp.einsum("ij, ji->i", L_inv_K_train_test[0].mT, L_inv_K_train_test[0]) + jnp.einsum("ij, ji->i", L_inv_K_train_test[1].mT, L_inv_K_train_test[1])
                 cov_update = lx.DiagonalLinearOperator(cov_update)
-
-        # Compute prior mean
-        mean_A_test = self.mean_function_A(test_inputs_A)
-        mean_B_test = self.mean_function_B(test_inputs_B)
-        prior_mean = jnp.kron(mean_A_test, mean_B_test).squeeze()
-
+        
         # Compute prior covariance
-        if return_covariance_type == "dense":
-            Kbtbt = add_jitter(self.kernel_B.gram(test_inputs_B), jitter)
-        else:
-            Katat = add_jitter(Katat.diagonal(), jitter)
-            Kbtbt = add_jitter(self.kernel_B.diagonal(test_inputs_B), jitter)
-        prior_cov = lx.KroneckerLinearOperator(Katat, Kbtbt)
+        
 
-
-        mean = prior_mean[:,None] + mean_update
-        cov = prior_cov - cov_update
+        mean = self.prior_mean(test_inputs_A, test_inputs_B)[:,None] + mean_update
+        cov = self.prior_cov(test_inputs_B, dense) - cov_update
 
         return GaussianDistribution(loc=jnp.atleast_1d(mean.squeeze()), scale=cov)
+
+
+    def prior_mean(self, A_test, B_test):
+        mean_A = self.mean_function_A(A_test)
+        mean_B = self.mean_function_B(B_test)
+        prior_mean = jnp.kron(mean_A, mean_B).squeeze()
+        return prior_mean
+
+
+    def prior_cov(self, B_test, dense):
+        if dense:
+            Kbtbt = add_jitter(self.kernel_B.gram(test_inputs_B), jitter)
+        else:
+            Katat = add_jitter(self.Katat.diagonal(), jitter)
+            Kbtbt = add_jitter(self.kernel_B.diagonal(test_inputs_B), jitter)
+        prior_cov = lx.KroneckerLinearOperator(Katat, Kbtbt)
+        return prior_cov
 
 
     def __call__(
