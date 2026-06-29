@@ -282,7 +282,6 @@ class SeparablePosterior():
         # TODO: What about noise?
         #noise = self.likelihood.noise_vector(train_data.n)
 
-        # TODO: Sanitize return_covariance_type argument
 
         # TODO: Optionally cache LkB, LkL
 
@@ -294,13 +293,16 @@ class SeparablePosterior():
         Kbtb = self.kernel_B.cross_covariance(test_inputs_B, self.B)
         K_test_train = lx.KroneckerLinearOperator(lx.MatrixLinearOperator(Kata), lx.MatrixLinearOperator(Kbtb))
 
-        dense = True if return_covariance_type == "dense" else False
+        # Parse 'return_covariance_type' input
+        mapping = {"dense": True, "diagonal": False}
+        if return_covariance_type.lower() not in mapping:
+            raise ValueError(f"'return_covariance_type' must be 'dense' or 'diagonal', got '{return_covariance_type}'")
+        dense = mapping[return_covariance_type.lower()]
 
         if not self.conditioned_on_functional:
             L_inv_res = self.solve_with_L11(self.residual_data)
             L_inv_K_train_test = self.solve_with_L11(K_test_train.as_matrix().mT)
             mean_update = L_inv_K_train_test.mT @ L_inv_res
-
 
             if return_covariance_type == "dense":
                 cov_update = L_inv_K_train_test.mT @ L_inv_K_train_test
@@ -340,10 +342,7 @@ class SeparablePosterior():
             else:
                 cov_update = jnp.einsum("ij, ji->i", L_inv_K_train_test[0].mT, L_inv_K_train_test[0]) + jnp.einsum("ij, ji->i", L_inv_K_train_test[1].mT, L_inv_K_train_test[1])
                 cov_update = lx.DiagonalLinearOperator(cov_update)
-        
-        # Compute prior covariance
-        
-
+                
         mean = self.prior_mean(test_inputs_A, test_inputs_B)[:,None] + mean_update
         cov = self.prior_cov(test_inputs_B, dense) - cov_update
 
