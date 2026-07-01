@@ -280,7 +280,7 @@ class SeparablePosterior():
         """
         if not self.conditioned_on_data:
             raise ValueError("Can not predict on posterior that has not been conditioned on data. Use prior.predict() instead.")
-        
+
         # TODO: What about noise?
         #noise = self.likelihood.noise_vector(train_data.n)
 
@@ -302,7 +302,7 @@ class SeparablePosterior():
         if not self.conditioned_on_functional:
             L_inv_res = self.solve_with_L11(self.residual_data)
             L_inv_K_train_test = self.solve_with_L11(K_test_train.as_matrix().mT)
-            
+
             mean_update = L_inv_K_train_test.mT @ L_inv_res
 
             if dense:
@@ -314,11 +314,11 @@ class SeparablePosterior():
 
         else:
 
-            self.kLB, self.LkL = compute_functional_matrices(use_cached_functionals)
-            kLBt = jax.vmap(kL)(test_inputs_B)
-            kLZ = jnp.kron(Kata.mT, kLB)
+            self.kL, self.kLB, self.LkL = self.compute_functional_matrices(use_cached_functionals)
+            kLBt = jax.vmap(self.kL)(test_inputs_B)
+            kLZ = jnp.kron(Kata.mT, self.kLB)
 
-            LkLZ = jnp.kron(self.Katat.as_matrix(), LkL)
+            LkLZ = jnp.kron(self.Katat.as_matrix(), self.LkL)
 
             L_21 = self.solve_with_L11(kLZ).mT
             S = LkLZ - L_21 @ L_21.mT
@@ -329,7 +329,7 @@ class SeparablePosterior():
             new_y = jnp.kron(jnp.ones((test_inputs_A.shape[0],1)), self.y_functional)
             mLZ = jnp.kron(self.mean_function_A(test_inputs_A), self.functional(lambda x: self.mean_function_B(jnp.atleast_2d(x)).squeeze())[:,None])
             residual_functional = new_y - mLZ
-            K_test_functional = lx.KroneckerLinearOperator(Katat, lx.MatrixLinearOperator(kLBt))
+            K_test_functional = lx.KroneckerLinearOperator(self.Katat, lx.MatrixLinearOperator(kLBt))
 
             L_inv_res = solve_block_triangular(self.solve_with_L11, L_21, solve_with_L22, self.residual_data, residual_functional)
             L_inv_K_train_test = solve_block_triangular(self.solve_with_L11, L_21, solve_with_L22, K_test_train.as_matrix().mT, K_test_functional.as_matrix().mT)
@@ -342,21 +342,21 @@ class SeparablePosterior():
             else:
                 cov_update = jnp.einsum("ij, ji->i", L_inv_K_train_test[0].mT, L_inv_K_train_test[0]) + jnp.einsum("ij, ji->i", L_inv_K_train_test[1].mT, L_inv_K_train_test[1])
                 cov_update = lx.DiagonalLinearOperator(cov_update)
-                
+
         mean = self.prior_mean(test_inputs_A, test_inputs_B)[:,None] + mean_update
         cov = self.prior_cov(test_inputs_B, dense) - cov_update
 
         return GaussianDistribution(loc=jnp.atleast_1d(mean.squeeze()), scale=cov)
 
-    def compute_functional_matrices(use_cached_functionals):
+    def compute_functional_matrices(self, use_cached_functionals):
         if use_cached_functionals:
-            if self.LkL is not None and self.kLB is not None:
-                return self.kLB, self.LkL
+            if hasattr(self, "LkL") and hasattr(self, "kLB") and hasattr(self, "kL"):
+                return self. kL, self.kLB, self.LkL
         # else recompute
         kL = lambda b: self.functional(lambda b_prime: self.kernel_B(b, b_prime))
         kLB = jax.vmap(kL)(self.B)
         LkL = jax.vmap(lambda i: self.functional(lambda x: kL(x)[i]))(jnp.arange(self.y_functional.shape[0]))
-        return kLB, LkL
+        return kL, kLB, LkL
 
     def prior_mean(self, A_test, B_test):
         mean_A = self.mean_function_A(A_test)
@@ -367,10 +367,10 @@ class SeparablePosterior():
 
     def prior_cov(self, B_test, dense):
         if dense:
-            Kbtbt = add_jitter(self.kernel_B.gram(test_inputs_B), jitter)
+            Kbtbt = self.kernel_B.gram(test_inputs_B)
         else:
-            Katat = add_jitter(self.Katat.diagonal(), jitter)
-            Kbtbt = add_jitter(self.kernel_B.diagonal(test_inputs_B), jitter)
+            Katat = lx.DiagonalLinearOperator(self.Katat.as_matrix().diagonal())
+            Kbtbt = self.kernel_B.diagonal(B_test)
         prior_cov = lx.KroneckerLinearOperator(Katat, Kbtbt)
         return prior_cov
 
