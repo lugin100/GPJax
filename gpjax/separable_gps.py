@@ -225,7 +225,7 @@ class SeparablePosterior():
         L_A = lx.TaggedLinearOperator(L_A, lx.lower_triangular_tag)
         L_B = lx.TaggedLinearOperator(L_B, lx.lower_triangular_tag)
         self.L_11 = lx.KroneckerLinearOperator(L_A, L_B)
-        solver = lx.Kronecker()
+        #solver = lx.Kronecker()
         self.solve_with_L11 = generate_solver(self.L_11)
         self.residual_data = self.compute_data_residual(train_data)
         self.conditioned_on_data = True
@@ -301,17 +301,16 @@ class SeparablePosterior():
 
         if not self.conditioned_on_functional:
             L_inv_res = self.solve_with_L11(self.residual_data)
-            L_inv_K_train_test = self.solve_with_L11(K_test_train.as_matrix().mT)
+            L_inv_K_train_test = self.solve_with_L11(K_test_train.transpose())
 
-            mean_update = L_inv_K_train_test.mT @ L_inv_res
+            mean_update = L_inv_K_train_test.transpose() @ L_inv_res
 
             if dense:
-                cov_update = L_inv_K_train_test.mT @ L_inv_K_train_test
-                cov_update = lx.MatrixLinearOperator(cov_update)
+                cov_update = L_inv_K_train_test.transpose() @ L_inv_K_train_test
             else:
-                cov_update = jnp.einsum("ij, ji->i", L_inv_K_train_test.mT, L_inv_K_train_test)
-                cov_update = lx.DiagonalLinearOperator(cov_update)
-
+                squared_sum_1 = jnp.sum(L_inv_K_train_test.operator1.as_matrix()**2, axis=0)
+                squared_sum_2 = jnp.sum(L_inv_K_train_test.operator2.as_matrix()**2, axis=0)
+                cov_update = lx.KroneckerLinearOperator(lx.DiagonalLinearOperator(squared_sum_1), lx.DiagonalLinearOperator(squared_sum_2))
         else:
 
             self.kL, self.kLB, self.LkL = self.compute_functional_matrices(use_cached_functionals)
