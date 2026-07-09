@@ -338,7 +338,7 @@ class SeparablePosterior():
                 cov_update = cov_update + lx.MatrixLinearOperator(L_inv_K_train_test[1].mT @ L_inv_K_train_test[1])
             else:
                 cov_update = L_inv_K_train_test[0].squared_sum()
-                cov_update = cov_update + lx.DiagonalLinearOperator(jnp.einsum("ij, ji->i", L_inv_K_train_test[1].mT, L_inv_K_train_test[1]))
+                cov_update = cov_update + lx.DiagonalLinearOperator(jnp.sum(L_inv_K_train_test[1]**2, axis=0))
 
         mean = self.prior_mean(test_inputs_A, test_inputs_B)[:,None] + mean_update
         cov = self.prior_cov(test_inputs_B, dense) - cov_update
