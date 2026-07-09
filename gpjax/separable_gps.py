@@ -289,9 +289,9 @@ class SeparablePosterior():
         self.Katat = add_jitter(self.kernel_A.gram(test_inputs_A), jitter)
 
         # Compute K_test_train
-        Kata = self.kernel_A.cross_covariance(test_inputs_A, self.A)
-        Kbtb = self.kernel_B.cross_covariance(test_inputs_B, self.B)
-        K_test_train = lx.KroneckerLinearOperator(lx.MatrixLinearOperator(Kata), lx.MatrixLinearOperator(Kbtb))
+        Kata = lx.MatrixLinearOperator(self.kernel_A.cross_covariance(test_inputs_A, self.A))
+        Kbtb = lx.MatrixLinearOperator(self.kernel_B.cross_covariance(test_inputs_B, self.B))
+        K_test_train = lx.KroneckerLinearOperator(Kata, Kbtb)
 
         # Parse 'return_covariance_type' input
         mapping = {"dense": True, "diagonal": False}
@@ -308,44 +308,43 @@ class SeparablePosterior():
             if dense:
                 cov_update = L_inv_K_train_test.transpose() @ L_inv_K_train_test
             else:
-                squared_sum_1 = jnp.sum(L_inv_K_train_test.operator1.as_matrix()**2, axis=0)
-                squared_sum_2 = jnp.sum(L_inv_K_train_test.operator2.as_matrix()**2, axis=0)
-                cov_update = lx.KroneckerLinearOperator(lx.DiagonalLinearOperator(squared_sum_1), lx.DiagonalLinearOperator(squared_sum_2))
+                cov_update = L_inv_K_train_test.squared_sum()                
         else:
 
             self.kL, self.kLB, self.LkL = self.compute_functional_matrices(use_cached_functionals)
-            kLBt = jax.vmap(self.kL)(test_inputs_B)
-            kLZ = jnp.kron(Kata.mT, self.kLB)
+            kLBt = lx.MatrixLinearOperator(jax.vmap(self.kL)(test_inputs_B))
+            kLZ = lx.KroneckerLinearOperator(Kata.transpose(), self.kLB)
 
-            LkLZ = jnp.kron(self.Katat.as_matrix(), self.LkL)
+            LkLZ = lx.KroneckerLinearOperator(self.Katat, self.LkL)
 
-            L_21 = self.solve_with_L11(kLZ).mT
-            S = LkLZ - L_21 @ L_21.mT
-            S = add_jitter(S, jitter)
+            L_21 = self.solve_with_L11(kLZ).transpose()
+            S = LkLZ - L_21 @ L_21.transpose()
+            S = add_jitter(S, jitter).as_matrix()
             L_22 = cholesky(S, lower=True)
-            L_22 = lx.MatrixLinearOperator(L_22, lx.symmetric_tag)
+            L_22 = lx.MatrixLinearOperator(L_22, lx.lower_triangular_tag)
             solve_with_L22 = generate_solver(L_22)
             new_y = jnp.kron(jnp.ones((test_inputs_A.shape[0],1)), self.y_functional)
             mLZ = jnp.kron(self.mean_function_A(test_inputs_A), self.functional(lambda x: self.mean_function_B(jnp.atleast_2d(x)).squeeze())[:,None])
             residual_functional = new_y - mLZ
-            K_test_functional = lx.KroneckerLinearOperator(self.Katat, lx.MatrixLinearOperator(kLBt))
+            K_test_functional = lx.KroneckerLinearOperator(self.Katat, kLBt)
 
             L_inv_res = solve_block_triangular(self.solve_with_L11, L_21, solve_with_L22, self.residual_data, residual_functional)
-            L_inv_K_train_test = solve_block_triangular(self.solve_with_L11, L_21, solve_with_L22, K_test_train.as_matrix().mT, K_test_functional.as_matrix().mT)
+            L_inv_K_train_test = solve_block_triangular(self.solve_with_L11, L_21, solve_with_L22, K_test_train.transpose(), K_test_functional.transpose())
 
-            mean_update = L_inv_K_train_test[0].mT @ L_inv_res[0] + L_inv_K_train_test[1].mT @ L_inv_res[1]
+            mean_update = L_inv_K_train_test[0].transpose() @ L_inv_res[0] + L_inv_K_train_test[1].mT @ L_inv_res[1]
 
             if dense:
-                cov_update = L_inv_K_train_test[0].mT @ L_inv_K_train_test[0] + L_inv_K_train_test[1].mT @ L_inv_K_train_test[1]
-                cov_update = lx.MatrixLinearOperator(cov_update)
+                cov_update = L_inv_K_train_test[0].transpose() @ L_inv_K_train_test[0]
+                cov_update = cov_update + lx.MatrixLinearOperator(L_inv_K_train_test[1].mT @ L_inv_K_train_test[1])
             else:
-                cov_update = jnp.einsum("ij, ji->i", L_inv_K_train_test[0].mT, L_inv_K_train_test[0]) + jnp.einsum("ij, ji->i", L_inv_K_train_test[1].mT, L_inv_K_train_test[1])
-                cov_update = lx.DiagonalLinearOperator(cov_update)
+                cov_update = L_inv_K_train_test[0].squared_sum()
+                cov_update = cov_update + lx.DiagonalLinearOperator(jnp.einsum("ij, ji->i", L_inv_K_train_test[1].mT, L_inv_K_train_test[1]))
 
         mean = self.prior_mean(test_inputs_A, test_inputs_B)[:,None] + mean_update
         cov = self.prior_cov(test_inputs_B, dense) - cov_update
 
         return GaussianDistribution(loc=jnp.atleast_1d(mean.squeeze()), scale=cov)
+
 
     def compute_functional_matrices(self, use_cached_functionals):
         if use_cached_functionals:
@@ -355,7 +354,8 @@ class SeparablePosterior():
         kL = lambda b: self.functional(lambda b_prime: self.kernel_B(b, b_prime))
         kLB = jax.vmap(kL)(self.B)
         LkL = jax.vmap(lambda i: self.functional(lambda x: kL(x)[i]))(jnp.arange(self.y_functional.shape[0]))
-        return kL, kLB, LkL
+        return kL, lx.MatrixLinearOperator(kLB), lx.MatrixLinearOperator(LkL)
+
 
     def prior_mean(self, A_test, B_test):
         mean_A = self.mean_function_A(A_test)

@@ -9,9 +9,10 @@ def generate_solver(L):
         Args:
             L: Linear Operator
     """
-    if not isinstance(L, lx.KroneckerLinearOperator):
-        raise ValueError("This is only intended to be used with KroneckerLinearOperators")
-    solver = lx.Kronecker()
+    if isinstance(L, lx.KroneckerLinearOperator):
+        solver = lx.Kronecker()
+    else:
+        solver = lx.AutoLinearSolver(well_posed=True)
     state = solver.init(L, options={})
     solve = lambda b: lx.linear_solve(L, b, solver, state=state).value
     state_T, _ = solver.transpose(state, {})
@@ -20,7 +21,8 @@ def generate_solver(L):
     def solve_with_L(B, transpose=False):
         if isinstance(B, lx.KroneckerLinearOperator):
             return solver.compute_for_Kronecker(state, B, {})[0]
-
+        if isinstance(B, lx.AbstractLinearOperator):
+            B = B.as_matrix()
         solve_fn = solve_T if transpose else solve
         if B.ndim == 1:
             return solve_fn(B)
