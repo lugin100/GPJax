@@ -139,10 +139,11 @@ def separable_conjugate_mll(
     A, B, y = data.A, data.B, data.y
     mean = prior.full_mean(A, B)
     gram = prior.full_gram(A, B)
+    y_flat, mx_flat = likelihood.prepare_targets(y, mean)
     noise = likelihood.noise_vector(data.n)
     Sigma = gram + lx.DiagonalLinearOperator(noise)
-    mll = GaussianDistribution(mean, Sigma)
-    return mll.log_prob(y.squeeze()).squeeze()
+    mll = GaussianDistribution(mx_flat.squeeze(), Sigma)
+    return mll.log_prob(y_flat.squeeze()).squeeze()
 
 
 def conjugate_loocv(posterior: ConjugatePosterior, data: Dataset) -> ScalarFloat:

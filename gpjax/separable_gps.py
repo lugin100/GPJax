@@ -79,7 +79,7 @@ class SeparablePrior(eqx.Module):
     def full_mean(self, A, B):
         mean_A = self.prior_A.mean_function(A)
         mean_B = self.prior_B.mean_function(B)
-        return jnp.kron(mean_A, mean_B).squeeze()
+        return jnp.kron(mean_A, mean_B)
 
     def full_gram(self, A, B):
         gram_A = self.prior_A.kernel.gram(A)
