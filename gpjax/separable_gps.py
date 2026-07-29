@@ -234,8 +234,7 @@ class SeparablePosterior():
     def compute_data_residual(self, train_data):
         r"""Difference between training targets and prior mean evaluated at training points."""
         prior_pred = jnp.kron(self.mean_function_A(train_data.A), self.mean_function_B(train_data.B))
-        return train_data.y - prior_pred
-
+        return (train_data.y - prior_pred).reshape(-1, 1)
 
     def condition_on_functional(self, functional, y):
         r"""Condition the posterior on a linear functional: $L[u] = y$.
@@ -280,7 +279,7 @@ class SeparablePosterior():
         """
         if not self.conditioned_on_data:
             raise ValueError("Can not predict on posterior that has not been conditioned on data. Use prior.predict() instead.")
-
+        P = self.likelihood.num_outputs
         # TODO: What about noise?
         #noise = self.likelihood.noise_vector(train_data.n)
 
@@ -308,7 +307,7 @@ class SeparablePosterior():
             if dense:
                 cov_update = L_inv_K_train_test.transpose() @ L_inv_K_train_test
             else:
-                cov_update = L_inv_K_train_test.squared_sum()                
+                cov_update = L_inv_K_train_test.squared_sum()
         else:
 
             self.kL, self.kLB, self.LkL = self.compute_functional_matrices(use_cached_functionals)
@@ -340,7 +339,9 @@ class SeparablePosterior():
                 cov_update = L_inv_K_train_test[0].squared_sum()
                 cov_update = cov_update + lx.DiagonalLinearOperator(jnp.sum(L_inv_K_train_test[1]**2, axis=0))
 
-        mean = self.prior_mean(test_inputs_A, test_inputs_B)[:,None] + mean_update
+        prior_mean = self.prior_mean(test_inputs_A, test_inputs_B)
+        prior_mean = jnp.tile(prior_mean, (P, 1)) if P > 1 else prior_mean
+        mean = prior_mean + mean_update
         cov = self.prior_cov(test_inputs_B, dense) - cov_update
 
         return GaussianDistribution(loc=jnp.atleast_1d(mean.squeeze()), scale=cov)
@@ -360,13 +361,13 @@ class SeparablePosterior():
     def prior_mean(self, A_test, B_test):
         mean_A = self.mean_function_A(A_test)
         mean_B = self.mean_function_B(B_test)
-        prior_mean = jnp.kron(mean_A, mean_B).squeeze()
+        prior_mean = jnp.kron(mean_A, mean_B)
         return prior_mean
 
 
     def prior_cov(self, B_test, dense):
         if dense:
-            Kbtbt = self.kernel_B.gram(test_inputs_B)
+            Kbtbt = self.kernel_B.gram(B_test)
         else:
             Katat = lx.DiagonalLinearOperator(self.Katat.as_matrix().diagonal())
             Kbtbt = self.kernel_B.diagonal(B_test)
