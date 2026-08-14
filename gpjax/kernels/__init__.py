@@ -44,6 +44,7 @@ from gpjax.kernels.nonstationary import (
     ArcCosine,
     Linear,
     Polynomial,
+    Gibbs,
 )
 from gpjax.kernels.stationary import (
     RBF,
@@ -81,6 +82,7 @@ __all__ = [
     "OrthogonalAdditiveKernel",
     "Periodic",
     "Polynomial",
+    "Gibbs",
     "PoweredExponential",
     "ProductKernel",
     "RationalQuadratic",

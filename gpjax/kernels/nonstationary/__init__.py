@@ -16,5 +16,6 @@
 from gpjax.kernels.nonstationary.arccosine import ArcCosine
 from gpjax.kernels.nonstationary.linear import Linear
 from gpjax.kernels.nonstationary.polynomial import Polynomial
+from gpjax.kernels.nonstationary.gibbs import Gibbs
 
-__all__ = ["ArcCosine", "Linear", "Polynomial"]
+__all__ = ["ArcCosine", "Linear", "Polynomial", "Gibbs"]
