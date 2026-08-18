@@ -182,23 +182,8 @@ class SeparablePrior(eqx.Module):
         return self.__mul__(other)
 
 
-class SeparablePosterior():
+class SeparablePosterior(AbstractPosterior):
     r"""Posterior to a separable GP prior with Gaussian likelihood."""
-
-    def __init__(
-        self,
-        prior: SeparablePrior,
-        likelihood: G,
-
-    ):
-        r"""Construct a Gaussian process posterior.
-
-        Args:
-            prior (SeparablePrior): The prior distribution.
-            likelihood (Gaussian): The likelihood distribution.
-        """
-        self.prior = prior
-        self.likelihood = likelihood
 
     def condition_on_data(self, train_data: SeparableDataset, jitter=1e-6):
         r"""Condition the posterior on data.
@@ -226,6 +211,9 @@ class SeparablePosterior():
             self.prior.prior_B.mean_function(train_data.B)
             )
         return (train_data.y - prior_pred).reshape(-1, 1)
+
+    def predict(self):
+        raise ValueError("Condition on data before predicting")
 
 
 class ConditionedSeparablePosterior():
