@@ -40,7 +40,8 @@ class Dataset:
         r"""Checks that the shapes of $X$ and $y$ are compatible,
         and provides warnings regarding the precision of $X$ and $y$."""
         _check_shape(self.X, self.y)
-        _check_precision(self.X, self.y)
+        _check_precision(self.X, "X")
+        _check_precision(self.X, "y")
 
     def __repr__(self) -> str:
         r"""Returns a string representation of the dataset."""
@@ -112,6 +113,9 @@ class SeparableDataset(Dataset):
         self.A = A[:,None] if A.ndim == 1 else A
         self.B = B[:,None] if B.ndim == 1 else B
         self.y = y[:,None] if y.ndim == 1 else y
+        _check_precision(self.A, "A")
+        _check_precision(self.B, "B")
+        _check_precision(self.y, "y")
         print(self.__repr__())
 
     @property
@@ -173,20 +177,13 @@ def _check_shape(
 
 
 def _check_precision(
-    X: Optional[Num[Array, "..."]], y: Optional[Num[Array, "..."]]
+    X: Optional[Num[Array, "..."]], name: str
 ) -> None:
-    r"""Checks the precision of $X$ and $y`."""
+    r"""Checks the precision of an array $X$`."""
     if X is not None and X.dtype != jnp.float64:
         warnings.warn(
-            "X is not of type float64. "
-            f"Got X.dtype={X.dtype}. This may lead to numerical instability. ",
-            stacklevel=2,
-        )
-
-    if y is not None and y.dtype != jnp.float64:
-        warnings.warn(
-            "y is not of type float64."
-            f"Got y.dtype={y.dtype}. This may lead to numerical instability.",
+            f"{name} is not of type float64. "
+            f"Got {name}.dtype={X.dtype}. This may lead to numerical instability. ",
             stacklevel=2,
         )
 
