@@ -109,17 +109,24 @@ class SeparableDataset(Dataset):
 
     def __init__(self, A, B, y):
         # Add feature dimension if not present
-        A = A[:,None] if A.ndim == 1 else A
-        B = B[:,None] if B.ndim == 1 else B
-        self.A = A
-        self.B = B
-        self.y = y
+        self.A = A[:,None] if A.ndim == 1 else A
+        self.B = B[:,None] if B.ndim == 1 else B
+        self.y = y[:,None] if y.ndim == 1 else y
+        print(self.__repr__())
 
     @property
     def n(self) -> int:
         r"""Number of observations."""
         return self.y.shape[0]
 
+    def __repr__(self) -> str:
+        r"""Returns a string representation of the dataset."""
+        repr = f'''Separable Dataset(
+            Observations in A: {self.A.shape[0]} - Dimensionality of A: {self.A.shape[1]}
+            Observations in B: {self.B.shape[0]} - Dimensionality of B: {self.B.shape[1]}
+            Total observations: {self.y.shape[0]} - Output dimensionality: {self.y.shape[1]}
+            )'''
+        return repr
 
 def cartesian_concatenation(A, B):
     r"""Build cartesian product of rows of inputs, and concatenate the pairs along columns.
@@ -127,7 +134,7 @@ def cartesian_concatenation(A, B):
     Args:
         A: Matrix of shape (N, D)
         B: Matrix of shape (M, E)
-    
+
     Returns:
         Matrix of shape (N*M, D+E) where each row is a concatenation
         of one row from A and one row from B, for all N*M combinations.
