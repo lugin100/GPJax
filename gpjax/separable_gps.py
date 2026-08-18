@@ -224,11 +224,24 @@ class SeparablePosterior():
         residual = self.compute_data_residual(train_data)
         return ConditionedSeparablePosterior(self, A, B, residual, solve_with_L11)
 
-
     def compute_data_residual(self, train_data):
         r"""Difference between training targets and prior mean evaluated at training points."""
         prior_pred = jnp.kron(self.mean_function_A(train_data.A), self.mean_function_B(train_data.B))
         return (train_data.y - prior_pred).reshape(-1, 1)
+
+class ConditionedSeparablePosterior():
+
+    def __init__(self, separablePosterior, A, B, residual, solve_with_L11):
+        self.likelihood = separablePosterior.likelihood
+        self.mean_function_A = separablePosterior.prior.prior_A.mean_function
+        self.mean_function_B = separablePosterior.prior.prior_B.mean_function
+        self.kernel_A = separablePosterior.prior.prior_A.kernel
+        self.kernel_B = separablePosterior.prior.prior_B.kernel
+        self.A = A
+        self.B = B
+        self.residual_data = residual
+        self.solve_with_L11 = solve_with_L11
+        self.conditioned_on_functional = False
 
     def condition_on_functional(self, functional, y):
         r"""Condition the posterior on a linear functional: $L[u] = y$.
@@ -249,7 +262,6 @@ class SeparablePosterior():
                 return jnp.concatenate((old_functional(x), functional(x)))
             self.functional = new_functional
 
-
     def compute_functional_matrices(self, use_cached_functionals):
         if use_cached_functionals:
             if hasattr(self, "LkL") and hasattr(self, "kLB") and hasattr(self, "kL"):
@@ -259,49 +271,6 @@ class SeparablePosterior():
         kLB = jax.vmap(kL)(self.B)
         LkL = jax.vmap(lambda i: self.functional(lambda x: kL(x)[i]))(jnp.arange(self.y_functional.shape[0]))
         return kL, lx.MatrixLinearOperator(kLB), lx.MatrixLinearOperator(LkL)
-
-
-    def __call__(
-        self,
-        test_inputs_A: Num[Array, "N D"],
-        test_inputs_B: Num[Array, "M E"],
-        jitter = 1e-6,
-        *,
-        return_covariance_type: Literal["dense", "diagonal"] = "dense",
-    ) -> GaussianDistribution:
-        r"""Infer the posterior distribution at given inputs,
-            taking all previous conditionings into account.
-
-        Args:
-            test_inputs_A: Where to infer on domain A.
-            test_inputs_B: Where to infer on domain B.
-            jitter (float): A small constant added to the diagonal of the
-                covariance matrix to ensure numerical stability.
-
-        Returns:
-            Gaussian distribution over values at test_inputs.
-        """
-        return self.predict(
-        test_inputs_A,
-        test_inputs_B,
-        jitter=jitter,
-        return_covariance_type=return_covariance_type,
-    )
-
-
-class ConditionedSeparablePosterior():
-
-    def __init__(self, separablePosterior, A, B, residual, solve_with_L11):
-        self.likelihood = separablePosterior.likelihood
-        self.mean_function_A = separablePosterior.prior.prior_A.mean_function
-        self.mean_function_B = separablePosterior.prior.prior_B.mean_function
-        self.kernel_A = separablePosterior.prior.prior_A.kernel
-        self.kernel_B = separablePosterior.prior.prior_B.kernel
-        self.A = A
-        self.B = B
-        self.residual_data = residual
-        self.solve_with_L11 = solve_with_L11
-        self.conditioned_on_functional = False
 
     def predict(
         self,
@@ -407,3 +376,30 @@ class ConditionedSeparablePosterior():
             Kbtbt = self.kernel_B.diagonal(B_test)
         prior_cov = lx.KroneckerLinearOperator(Katat, Kbtbt)
         return prior_cov
+
+    def __call__(
+        self,
+        test_inputs_A: Num[Array, "N D"],
+        test_inputs_B: Num[Array, "M E"],
+        jitter = 1e-6,
+        *,
+        return_covariance_type: Literal["dense", "diagonal"] = "dense",
+    ) -> GaussianDistribution:
+        r"""Infer the posterior distribution at given inputs,
+            taking all previous conditionings into account.
+
+        Args:
+            test_inputs_A: Where to infer on domain A.
+            test_inputs_B: Where to infer on domain B.
+            jitter (float): A small constant added to the diagonal of the
+                covariance matrix to ensure numerical stability.
+
+        Returns:
+            Gaussian distribution over values at test_inputs.
+        """
+        return self.predict(
+        test_inputs_A,
+        test_inputs_B,
+        jitter=jitter,
+        return_covariance_type=return_covariance_type,
+    )
