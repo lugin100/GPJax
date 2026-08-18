@@ -1,30 +1,30 @@
-import beartype.typing as tp
 from typing import Literal
-import equinox as eqx
-import jax
-import jax.numpy as jnp
-from jax.scipy.linalg import cholesky
-
+import beartype.typing as tp
 from jaxtyping import (
     Float,
     Num,
 )
 from gpjax.typing import Array
-from gpjax.dataset import SeparableDataset
+
+import jax
+import jax.numpy as jnp
+from jax.scipy.linalg import cholesky
+import equinox as eqx
 import lineax as lx
+
+from gpjax.dataset import SeparableDataset
 from gpjax.distributions import GaussianDistribution
 from gpjax.likelihoods import AbstractLikelihood, Gaussian
 from gpjax.gps import AbstractPrior, AbstractPosterior
 from gpjax.linalg import add_jitter, solve_block_triangular, generate_solver
 
 L = tp.TypeVar("L", bound=AbstractLikelihood)
-G = tp.TypeVar("G", bound=Gaussian)
 P = tp.TypeVar("P", bound=AbstractPrior)
-PO = tp.TypeVar("PO", bound=AbstractPosterior)
 
 
 class SeparablePrior(eqx.Module):
-    r"""Gaussian process prior over two spaces $\mathbb{A}$ and $\mathbb{B}$, where mean and kernel are given as:
+    r"""Gaussian process prior over two spaces $\mathbb{A}$ and $\mathbb{B}$,
+    where mean and kernel are given as:
     $$m((a,b)) = m_A(a)\cdot m_B(b)$$
     $$k((a,b), (a^\prime,b^\prime)) = k_A(a, a^\prime)\cdot k_B(b, b^\prime)$$
     """
@@ -61,14 +61,14 @@ class SeparablePrior(eqx.Module):
 
         Args:
             test_inputs_A: Input locations where the GP should be evaluated.
-            return_covariance_type: Literal denoting whether to return the full covariance
-                of the joint predictive distribution at the test_inputs (dense)
-                or just the the standard-deviation of the predictive distribution at
-                the test_inputs.
+            return_covariance_type: Literal denoting whether to return the full
+                covariance of the joint predictive distribution at the
+                test_inputs (dense) or just the the standard-deviation of the
+                predictive distribution at the test_inputs.
 
         Returns:
-            GaussianDistribution: A multivariate normal random variable representation
-                of the Gaussian process.
+            GaussianDistribution: A multivariate normal random variable
+                representation of the Gaussian process.
         """
         return self.predict(
             test_inputs_A,
@@ -86,7 +86,6 @@ class SeparablePrior(eqx.Module):
         gram_B = self.prior_B.kernel.gram(B)
         return lx.KroneckerLinearOperator(gram_A, gram_B)
 
-
     def predict(
         self,
         test_inputs_A: Num[Array, "N D"],
@@ -99,31 +98,28 @@ class SeparablePrior(eqx.Module):
         over each combination of inputs for A and B.
 
         Args:
-            test_inputs_A (Float[Array, "N D"]): The inputs at which to evaluate prior A.
-            test_inputs_B (Float[Array, "M E"]): The inputs at which to evaluate prior B.
+            test_inputs_A (Num[Array, "N D"]): The inputs at which to evaluate prior A.
+            test_inputs_B (Num[Array, "M E"]): The inputs at which to evaluate prior B.
 
-            return_covariance_type: Literal denoting whether to return the full covariance
-                of the joint predictive distribution at the test_inputs (dense)
-                or just the standard-deviation of the predictive distribution at
-                the test inputs.
+            return_covariance_type: Literal denoting whether to return the full
+                covariance of the joint predictive distribution at the
+                test_inputs (dense) or just the the standard-deviation of the
+                predictive distribution at the test_inputs.
 
         Returns:
-            GaussianDistribution: A multivariate normal random variable representation
-                of the Gaussian process.
+            GaussianDistribution: A multivariate normal random variable
+                representation of the Gaussian process.
         """
-        NM = test_inputs_A.shape[0] * test_inputs_B.shape[0]
-        jitterOperator = self.jitter * lx.IdentityLinearOperator(NM)
-
         def _return_full_covariance(t_A, t_B):
             Kaa = self.prior_A.kernel.gram(t_A)
             Kbb = self.prior_B.kernel.gram(t_B)
-            return lx.KroneckerLinearOperator(Kaa, Kbb) + jitterOperator
+            return add_jitter(lx.KroneckerLinearOperator(Kaa, Kbb), jitter)
 
         def _return_diagonal_covariance(t_A, t_B):
-        	Kaa = self.prior_A.kernel.diagonal(t_A)
-        	Kbb = self.prior_B.kernel.diagonal(t_B)
-        	Kxx = jnp.kron(Kaa, Kbb)
-        	return lx.DiagonalLinearOperator(Kxx) + jitterOperator
+            Kaa = self.prior_A.kernel.diagonal(t_A)
+            Kbb = self.prior_B.kernel.diagonal(t_B)
+            Kxx = jnp.kron(Kaa, Kbb)
+            return add_jitter(lx.DiagonalLinearOperator(Kxx), jitter)
 
         mean_at_test = self.full_mean(test_inputs_A, test_inputs_B)
 
@@ -134,7 +130,6 @@ class SeparablePrior(eqx.Module):
             test_inputs_A,
             test_inputs_B
         )
-
         return GaussianDistribution(
             loc=jnp.atleast_1d(mean_at_test.squeeze()), scale=cov
         )
@@ -160,10 +155,10 @@ class SeparablePrior(eqx.Module):
         """
         is_gaussian_likelihood = isinstance(other, Gaussian)
         if is_gaussian_likelihood:
-        	return SeparablePosterior(prior=self, likelihood=other)
-       	raise NotImplementedError(
-       		"SeparablePrior only supports Gaussian likelihoods."
-       		)
+            return SeparablePosterior(prior=self, likelihood=other)
+        raise NotImplementedError(
+            "SeparablePrior only supports Gaussian likelihoods."
+            )
 
     def __rmul__(self, other):
         r"""Combine the prior with a likelihood to form a posterior distribution.
@@ -205,7 +200,8 @@ class SeparablePosterior(AbstractPosterior):
         return ConditionedSeparablePosterior(self, A, B, residual, solve_with_L11)
 
     def compute_data_residual(self, train_data):
-        r"""Difference between training targets and prior mean evaluated at training points."""
+        r"""Difference between training targets and
+        prior mean evaluated at training points."""
         prior_pred = jnp.kron(
             self.prior.prior_A.mean_function(train_data.A),
             self.prior.prior_B.mean_function(train_data.B)
@@ -217,6 +213,10 @@ class SeparablePosterior(AbstractPosterior):
 
 
 class ConditionedSeparablePosterior():
+    r"""Posterior to a separable GP prior that is conditoned on data.
+
+    Does not subclass AbstractPosterior in order to not be an eqx.Module,
+    which simplifies implementation."""
 
     def __init__(self, separablePosterior, A, B, residual, solve_with_L11):
         self.likelihood = separablePosterior.likelihood
@@ -234,9 +234,9 @@ class ConditionedSeparablePosterior():
         r"""Condition the posterior on a linear functional: $L[u] = y$.
 
         Args:
-            functional (Callable): A callable mapping 
-                a PDE solution function $u: \mathbb{R}^d \mapsto \mathbb{R}$ to a vector in $\mathbb{R}^l$.
-            y: A vector in $\mathbb{R}^l 
+            functional (Callable): A callable mapping a PDE solution function
+            $u: \mathbb{R}^d \mapsto \mathbb{R}$ to a vector in $\mathbb{R}^l$.
+            y: A vector in $\mathbb{R}^l
         """
         if not self.conditioned_on_functional:
             self.y_functional = y
@@ -245,6 +245,7 @@ class ConditionedSeparablePosterior():
         else:
             self.y_functional = jnp.concatenate((self.y_functional, y))
             old_functional = self.functional
+
             def new_functional(x):
                 return jnp.concatenate((old_functional(x), functional(x)))
             self.functional = new_functional
@@ -256,14 +257,16 @@ class ConditionedSeparablePosterior():
         # else recompute
         kL = lambda b: self.functional(lambda b_prime: self.kernel_B(b, b_prime))
         kLB = jax.vmap(kL)(self.B)
-        LkL = jax.vmap(lambda i: self.functional(lambda x: kL(x)[i]))(jnp.arange(self.y_functional.shape[0]))
+        LkL = jax.vmap(lambda i: self.functional(
+            lambda x: kL(x)[i]))(jnp.arange(self.y_functional.shape[0])
+            )
         return kL, lx.MatrixLinearOperator(kLB), lx.MatrixLinearOperator(LkL)
 
     def predict(
         self,
         test_inputs_A: Num[Array, "N D"],
         test_inputs_B: Num[Array, "M E"],
-        jitter = 1e-6,
+        jitter=1e-6,
         *,
         return_covariance_type: Literal["dense", "diagonal"] = "dense",
         use_cached_functionals: bool = False,
@@ -276,8 +279,8 @@ class ConditionedSeparablePosterior():
             test_inputs_B: Where to infer on domain B.
             jitter (float): A small constant added to the diagonal of the
                 covariance matrix to ensure numerical stability.
-            use_cached_functionals: Indicate that functionals have not changed since last inference call,
-                                    meaning cached computation can be used
+            use_cached_functionals: Indicate that functionals have not changed
+                since last inference call, so use cached computations.
         Returns:
             Gaussian distribution over values at test_inputs.
         """
@@ -285,8 +288,7 @@ class ConditionedSeparablePosterior():
         # TODO: What about noise?
         #noise = self.likelihood.noise_vector(train_data.n)
 
-
-        # Used for LkLZ and prior_cov
+        # Precompute Katat for LkLZ and prior_cov
         self.Katat = add_jitter(self.kernel_A.gram(test_inputs_A), jitter)
 
         # Compute K_test_train
@@ -297,7 +299,9 @@ class ConditionedSeparablePosterior():
         # Parse 'return_covariance_type' input
         mapping = {"dense": True, "diagonal": False}
         if return_covariance_type.lower() not in mapping:
-            raise ValueError(f"'return_covariance_type' must be 'dense' or 'diagonal', got '{return_covariance_type}'")
+            msg = f'''return_covariance_type must be 'dense' or 'diagonal',
+            got {return_covariance_type}'''
+            raise ValueError(msg)
         dense = mapping[return_covariance_type.lower()]
 
         if not self.conditioned_on_functional:
@@ -315,7 +319,6 @@ class ConditionedSeparablePosterior():
             self.kL, self.kLB, self.LkL = self.compute_functional_matrices(use_cached_functionals)
             kLBt = lx.MatrixLinearOperator(jax.vmap(self.kL)(test_inputs_B))
             kLZ = lx.KroneckerLinearOperator(Kata.transpose(), self.kLB)
-
             LkLZ = lx.KroneckerLinearOperator(self.Katat, self.LkL)
 
             L_21 = self.solve_with_L11(kLZ).transpose()
@@ -368,7 +371,7 @@ class ConditionedSeparablePosterior():
         self,
         test_inputs_A: Num[Array, "N D"],
         test_inputs_B: Num[Array, "M E"],
-        jitter = 1e-6,
+        jitter=1e-6,
         *,
         return_covariance_type: Literal["dense", "diagonal"] = "dense",
     ) -> GaussianDistribution:
@@ -385,8 +388,8 @@ class ConditionedSeparablePosterior():
             Gaussian distribution over values at test_inputs.
         """
         return self.predict(
-        test_inputs_A,
-        test_inputs_B,
-        jitter=jitter,
-        return_covariance_type=return_covariance_type,
-    )
+            test_inputs_A,
+            test_inputs_B,
+            jitter=jitter,
+            return_covariance_type=return_covariance_type,
+        )
