@@ -367,6 +367,7 @@ class SeparablePosterior():
 
     def prior_cov(self, B_test, dense):
         if dense:
+            Katat = self.Katat
             Kbtbt = self.kernel_B.gram(B_test)
         else:
             Katat = lx.DiagonalLinearOperator(self.Katat.as_matrix().diagonal())
