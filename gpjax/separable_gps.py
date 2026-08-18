@@ -199,11 +199,6 @@ class SeparablePosterior():
         """
         self.prior = prior
         self.likelihood = likelihood
-        self.mean_function_A = prior.prior_A.mean_function
-        self.mean_function_B = prior.prior_B.mean_function
-        self.kernel_A = prior.prior_A.kernel
-        self.kernel_B = prior.prior_B.kernel
-        self.conditioned_on_functional = False
 
     def condition_on_data(self, train_data: SeparableDataset, jitter=1e-6):
         r"""Condition the posterior on data.
@@ -213,21 +208,25 @@ class SeparablePosterior():
         """
         A = train_data.A
         B = train_data.B
-        self.Kaa = add_jitter(self.kernel_A.gram(A).as_matrix(), jitter)
-        self.Kbb = add_jitter(self.kernel_B.gram(B).as_matrix(), jitter)
-        L_A = lx.MatrixLinearOperator(cholesky(self.Kaa, lower=True))
-        L_B = lx.MatrixLinearOperator(cholesky(self.Kbb, lower=True))
+        Kaa = add_jitter(self.prior.prior_A.kernel.gram(A).as_matrix(), jitter)
+        Kbb = add_jitter(self.prior.prior_B.kernel.gram(B).as_matrix(), jitter)
+        L_A = lx.MatrixLinearOperator(cholesky(Kaa, lower=True))
+        L_B = lx.MatrixLinearOperator(cholesky(Kbb, lower=True))
         L_A = lx.TaggedLinearOperator(L_A, lx.lower_triangular_tag)
         L_B = lx.TaggedLinearOperator(L_B, lx.lower_triangular_tag)
-        self.L_11 = lx.KroneckerLinearOperator(L_A, L_B)
-        solve_with_L11 = generate_solver(self.L_11)
+        L_11 = lx.KroneckerLinearOperator(L_A, L_B)
+        solve_with_L11 = generate_solver(L_11)
         residual = self.compute_data_residual(train_data)
         return ConditionedSeparablePosterior(self, A, B, residual, solve_with_L11)
 
     def compute_data_residual(self, train_data):
         r"""Difference between training targets and prior mean evaluated at training points."""
-        prior_pred = jnp.kron(self.mean_function_A(train_data.A), self.mean_function_B(train_data.B))
+        prior_pred = jnp.kron(
+            self.prior.prior_A.mean_function(train_data.A),
+            self.prior.prior_B.mean_function(train_data.B)
+            )
         return (train_data.y - prior_pred).reshape(-1, 1)
+
 
 class ConditionedSeparablePosterior():
 
