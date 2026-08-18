@@ -203,10 +203,7 @@ class SeparablePosterior():
         self.mean_function_B = prior.prior_B.mean_function
         self.kernel_A = prior.prior_A.kernel
         self.kernel_B = prior.prior_B.kernel
-        self.conditioned_on_data = False
         self.conditioned_on_functional = False
-
-
 
     def condition_on_data(self, train_data: SeparableDataset, jitter=1e-6):
         r"""Condition the posterior on data.
@@ -214,8 +211,6 @@ class SeparablePosterior():
         Args:
             train_data (SeparableDataset): Data to condition on.
         """
-        if self.conditioned_on_data:
-            raise ValueError("Can only condition on data once")
         self.A = train_data.A
         self.B = train_data.B
         self.Kaa = add_jitter(self.kernel_A.gram(self.A).as_matrix(), jitter)
@@ -225,10 +220,8 @@ class SeparablePosterior():
         L_A = lx.TaggedLinearOperator(L_A, lx.lower_triangular_tag)
         L_B = lx.TaggedLinearOperator(L_B, lx.lower_triangular_tag)
         self.L_11 = lx.KroneckerLinearOperator(L_A, L_B)
-        #solver = lx.Kronecker()
         self.solve_with_L11 = generate_solver(self.L_11)
         self.residual_data = self.compute_data_residual(train_data)
-        self.conditioned_on_data = True
 
 
     def compute_data_residual(self, train_data):
@@ -277,8 +270,6 @@ class SeparablePosterior():
         Returns:
             Gaussian distribution over values at test_inputs.
         """
-        if not self.conditioned_on_data:
-            raise ValueError("Can not predict on posterior that has not been conditioned on data. Use prior.predict() instead.")
         P = self.likelihood.num_outputs
         # TODO: What about noise?
         #noise = self.likelihood.noise_vector(train_data.n)
@@ -357,13 +348,11 @@ class SeparablePosterior():
         LkL = jax.vmap(lambda i: self.functional(lambda x: kL(x)[i]))(jnp.arange(self.y_functional.shape[0]))
         return kL, lx.MatrixLinearOperator(kLB), lx.MatrixLinearOperator(LkL)
 
-
     def prior_mean(self, A_test, B_test):
         mean_A = self.mean_function_A(A_test)
         mean_B = self.mean_function_B(B_test)
         prior_mean = jnp.kron(mean_A, mean_B)
         return prior_mean
-
 
     def prior_cov(self, B_test, dense):
         if dense:
@@ -374,7 +363,6 @@ class SeparablePosterior():
             Kbtbt = self.kernel_B.diagonal(B_test)
         prior_cov = lx.KroneckerLinearOperator(Katat, Kbtbt)
         return prior_cov
-
 
     def __call__(
         self,
