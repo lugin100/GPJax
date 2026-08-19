@@ -116,7 +116,6 @@ class SeparableDataset(Dataset):
         _check_precision(self.A, "A")
         _check_precision(self.B, "B")
         _check_precision(self.y, "y")
-        print(self.__repr__())
 
     @property
     def n(self) -> int:
