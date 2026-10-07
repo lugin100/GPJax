@@ -230,18 +230,21 @@ class ConditionedSeparablePosterior():
         self.solve_with_L11 = solve_with_L11
         self.conditioned_on_functional = False
 
-    def condition_on_functional(self, functional, y):
+    def condition_on_functional(self, functional, y, uncertainty=0.):
         r"""Condition the posterior on a linear functional: $L[u] = y$.
 
         Args:
             functional (Callable): A callable mapping a PDE solution function
             $u: \mathbb{R}^d \mapsto \mathbb{R}$ to a vector in $\mathbb{R}^l$.
             y: A vector in $\mathbb{R}^l
+            uncertainty: Assumed variance of the residual between functional output and y.
+                Can be zero, in which case the functional is assumed to be exact (default).
         """
         if not self.conditioned_on_functional:
             self.y_functional = y
             self.functional = functional
             self.conditioned_on_functional = True
+            self.Sigma_functional = jnp.ones(len(y)) * uncertainty
         else:
             self.y_functional = jnp.concatenate((self.y_functional, y))
             old_functional = self.functional
@@ -249,6 +252,8 @@ class ConditionedSeparablePosterior():
             def new_functional(x):
                 return jnp.concatenate((old_functional(x), functional(x)))
             self.functional = new_functional
+            new_Sigma = jnp.ones_like(y) * uncertainty
+            self.Sigma_functional = jnp.concatenate((self.Sigma_functional, new_Sigma))
 
     def compute_functional_matrices(self, use_cached_functionals):
         if use_cached_functionals:
@@ -261,6 +266,7 @@ class ConditionedSeparablePosterior():
             lambda x: kL(x)[i]))(jnp.arange(self.y_functional.shape[0])
             )
         assert jnp.allclose(LkL - LkL.mT, 0), "The functional Gram matrix is not symmetric. Make sure that the functionals are linear."
+        LkL = LkL + jnp.diag(self.Sigma_functional)
         return kL, lx.MatrixLinearOperator(kLB), lx.MatrixLinearOperator(LkL)
 
     def predict(
