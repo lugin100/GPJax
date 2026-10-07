@@ -260,6 +260,7 @@ class ConditionedSeparablePosterior():
         LkL = jax.vmap(lambda i: self.functional(
             lambda x: kL(x)[i]))(jnp.arange(self.y_functional.shape[0])
             )
+        assert jnp.allclose(LkL - LkL.mT, 0), "The functional Gram matrix is not symmetric. Make sure that the functionals are linear."
         return kL, lx.MatrixLinearOperator(kLB), lx.MatrixLinearOperator(LkL)
 
     def predict(
