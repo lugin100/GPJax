@@ -230,21 +230,29 @@ class ConditionedSeparablePosterior():
         self.solve_with_L11 = solve_with_L11
         self.conditioned_on_functional = False
 
-    def condition_on_functional(self, functional, y, uncertainty=0.):
+    def condition_on_functional(self, functional, y, uncertainty=0., vectorize=False):
         r"""Condition the posterior on a linear functional: $L[u] = y$.
 
         Args:
             functional (Callable): A callable mapping a PDE solution function
             $u: \mathbb{R}^d \mapsto \mathbb{R}$ to a vector in $\mathbb{R}^l$.
+            If 'vectorize'==True, a callable mapping a batch of PDE solutions 
+            $u: \mathbb{R}^d \mapsto \mathbb{R}^m$ to a batch of vectors ($\mathbb{R}^{l \times m}$)
             y: A vector in $\mathbb{R}^l
             uncertainty: Assumed variance of the residual between functional output and y.
                 Can be zero, in which case the functional is assumed to be exact (default).
+            vectorize: Whether to batch-compute the functional Gram matrix for a speed-up.
+                If True, assumes 'functional' to operate on a multivariate function, see above.
+
+            Note:
+                Vectorization is only applied if all conditionings are called with 'vectorize'=True.
         """
         if not self.conditioned_on_functional:
             self.y_functional = y
             self.functional = functional
             self.conditioned_on_functional = True
             self.Sigma_functional = jnp.ones(len(y)) * uncertainty
+            self.vectorize = vectorize
         else:
             self.y_functional = jnp.concatenate((self.y_functional, y))
             old_functional = self.functional
@@ -254,20 +262,26 @@ class ConditionedSeparablePosterior():
             self.functional = new_functional
             new_Sigma = jnp.ones_like(y) * uncertainty
             self.Sigma_functional = jnp.concatenate((self.Sigma_functional, new_Sigma))
+            self.vectorize = self.vectorize & vectorize
 
     def compute_functional_matrices(self, use_cached_functionals):
         if use_cached_functionals:
             if hasattr(self, "LkL") and hasattr(self, "kLB") and hasattr(self, "kL"):
-                return self. kL, self.kLB, self.LkL
+                return self.kL, self.kLB, self.LkL
         # else recompute
         kL = lambda b: self.functional(lambda b_prime: self.kernel_B(b, b_prime))
-        kLB = jax.vmap(kL)(self.B)
-        LkL = jax.vmap(lambda i: self.functional(
-            lambda x: kL(x)[i]))(jnp.arange(self.y_functional.shape[0])
-            )
+        kLB = jax.vmap(kL)(self.B) # Note: Can this benefit from vectorize=True too?
+
+        if self.vectorize:
+            LkL = self.functional(kL)
+        else:
+            LkL = jax.vmap(lambda i: self.functional(
+                lambda x: kL(x)[i]))(jnp.arange(self.y_functional.shape[0])
+                )
         assert jnp.allclose(LkL - LkL.mT, 0), "The functional Gram matrix is not symmetric. Make sure that the functionals are linear."
         LkL = LkL + jnp.diag(self.Sigma_functional)
         return kL, lx.MatrixLinearOperator(kLB), lx.MatrixLinearOperator(LkL)
+
 
     def predict(
         self,
