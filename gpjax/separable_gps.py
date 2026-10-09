@@ -260,7 +260,7 @@ class ConditionedSeparablePosterior():
             def new_functional(x):
                 return jnp.concatenate((old_functional(x), functional(x)))
             self.functional = new_functional
-            new_Sigma = jnp.ones_like(y) * uncertainty
+            new_Sigma = jnp.ones(len(y)) * uncertainty
             self.Sigma_functional = jnp.concatenate((self.Sigma_functional, new_Sigma))
             self.vectorize = self.vectorize & vectorize
 
