@@ -197,6 +197,7 @@ class SeparablePosterior(AbstractPosterior):
         L_11 = lx.KroneckerLinearOperator(L_A, L_B)
         solve_with_L11 = generate_solver(L_11)
         residual = self.compute_data_residual(train_data)
+        #debug_print(jnp.kron(Kaa, Kbb), "Kxx")
         return ConditionedSeparablePosterior(self, A, B, residual, solve_with_L11)
 
     def compute_data_residual(self, train_data):
@@ -278,7 +279,9 @@ class ConditionedSeparablePosterior():
             LkL = jax.vmap(lambda i: self.functional(
                 lambda x: kL(x)[i]))(jnp.arange(self.y_functional.shape[0])
                 )
+        #debug_print(self.LkL, "LkL")
         assert jnp.allclose(LkL - LkL.mT, 0), "The functional Gram matrix is not symmetric. Make sure that the functionals are linear."
+        assert jnp.linalg.eigvalsh(LkL).min() > 0, "The functional Gram matrix is not pos. definite. Make sure the kernel is psd and numerically stable under the functionals operations."
         LkL = LkL + jnp.diag(self.Sigma_functional)
         return kL, lx.MatrixLinearOperator(kLB), lx.MatrixLinearOperator(LkL)
 
@@ -341,7 +344,6 @@ class ConditionedSeparablePosterior():
             kLBt = lx.MatrixLinearOperator(jax.vmap(self.kL)(test_inputs_B))
             kLZ = lx.KroneckerLinearOperator(Kata.transpose(), self.kLB)
             LkLZ = lx.KroneckerLinearOperator(self.Katat, self.LkL)
-
             L_21 = self.solve_with_L11(kLZ).transpose()
             S = LkLZ - L_21 @ L_21.transpose()
             S = add_jitter(S, jitter).as_matrix()
@@ -414,3 +416,10 @@ class ConditionedSeparablePosterior():
             jitter=jitter,
             return_covariance_type=return_covariance_type,
         )
+
+def debug_print(mat, name):
+    mat = mat.as_matrix() if isinstance(mat, lx.AbstractLinearOperator) else mat
+    print(f"{name}.shape: {mat.shape}")
+    print(f"{name} min eig: {jnp.linalg.eigvalsh(mat).min()}")
+    print(f"{name} cond: {jnp.linalg.cond(mat)}")
+    print(f"{name} symmetric: {(mat - mat.T).max()  < 1e-8}") 
