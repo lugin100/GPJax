@@ -390,26 +390,24 @@ class ConditionedSeparablePosterior():
 
     def __call__(
         self,
-        P_test: Num[Array, "N D"],
-        X_test: Num[Array, "M E"],
+        p_test: Num[Array, "D"],
         jitter=1e-6,
         *,
         return_covariance_type: Literal["dense", "diagonal"] = "dense",
     ) -> GaussianDistribution:
-        r"""Infer the posterior distribution at given inputs,
+        r"""Return a function that maps test inputs from X to the posterior distribution at given inputs (p_test, X_test),
             taking all previous conditionings into account.
 
         Args:
-            P_test: Where to infer on domain P.
-            X_test: Where to infer on domain X.
+            p_test: Single inference point on domain P.
             jitter (float): A small constant added to the diagonal of the
                 covariance matrix to ensure numerical stability.
 
         Returns:
-            Gaussian distribution over values at test inputs.
+            Callable mapping X_test to a Gaussian distribution over values at test inputs.
         """
-        return self.predict(
-            P_test,
+        return lambda X_test: self.predict(
+            jnp.atleast_2d(p_test),
             X_test,
             jitter=jitter,
             return_covariance_type=return_covariance_type,
