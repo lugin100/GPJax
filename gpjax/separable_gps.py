@@ -252,7 +252,7 @@ class ConditionedSeparablePosterior():
             self.y_functional = y
             self.functional = functional
             self.conditioned_on_functional = True
-            self.Sigma_functional = jnp.ones(len(y)) * uncertainty
+            self.Tau = jnp.ones(len(y)) * uncertainty
             self.vectorize = vectorize
         else:
             self.y_functional = jnp.concatenate((self.y_functional, y))
@@ -261,8 +261,8 @@ class ConditionedSeparablePosterior():
             def new_functional(x):
                 return jnp.concatenate((old_functional(x), functional(x)))
             self.functional = new_functional
-            new_Sigma = jnp.ones(len(y)) * uncertainty
-            self.Sigma_functional = jnp.concatenate((self.Sigma_functional, new_Sigma))
+            new_Tau = jnp.ones(len(y)) * uncertainty
+            self.Tau = jnp.concatenate((self.Tau, new_Tau))
             self.vectorize = self.vectorize & vectorize
 
     def compute_functional_matrices(self, use_cached_functionals):
@@ -271,7 +271,7 @@ class ConditionedSeparablePosterior():
                 return self.kL, self.kLB, self.LkL
         # else recompute
         kL = lambda b: self.functional(lambda b_prime: self.kernel_B(b, b_prime))
-        kLB = jax.vmap(kL)(self.B) # Note: Can this benefit from vectorize=True too?
+        kLB = jax.vmap(kL)(self.B)
 
         if self.vectorize:
             LkL = self.functional(kL)
@@ -279,10 +279,10 @@ class ConditionedSeparablePosterior():
             LkL = jax.vmap(lambda i: self.functional(
                 lambda x: kL(x)[i]))(jnp.arange(self.y_functional.shape[0])
                 )
-        #debug_print(self.LkL, "LkL")
+        LkL = add_jitter(LkL, 1e-6)
+        #debug_print(LkL, "LkL")
         assert jnp.allclose(LkL - LkL.mT, 0), "The functional Gram matrix is not symmetric. Make sure that the functionals are linear."
         assert jnp.linalg.eigvalsh(LkL).min() > 0, "The functional Gram matrix is not pos. definite. Make sure the kernel is psd and numerically stable under the functionals operations."
-        LkL = LkL + jnp.diag(self.Sigma_functional)
         return kL, lx.MatrixLinearOperator(kLB), lx.MatrixLinearOperator(LkL)
 
 
@@ -345,7 +345,7 @@ class ConditionedSeparablePosterior():
             kLZ = lx.KroneckerLinearOperator(Kata.transpose(), self.kLB)
             LkLZ = lx.KroneckerLinearOperator(self.Katat, self.LkL)
             L_21 = self.solve_with_L11(kLZ).transpose()
-            S = LkLZ - L_21 @ L_21.transpose()
+            S = LkLZ - L_21 @ L_21.transpose() + lx.DiagonalLinearOperator(self.Tau)
             S = add_jitter(S, jitter).as_matrix()
             L_22 = cholesky(S, lower=True)
             L_22 = lx.MatrixLinearOperator(L_22, lx.lower_triangular_tag)
