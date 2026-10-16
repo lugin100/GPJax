@@ -344,8 +344,11 @@ class ConditionedSeparablePosterior():
             kLBt = lx.MatrixLinearOperator(jax.vmap(self.kL)(test_inputs_B))
             kLZ = lx.KroneckerLinearOperator(Kata.transpose(), self.kLB)
             LkLZ = lx.KroneckerLinearOperator(self.Katat, self.LkL)
+            variance = lx.KroneckerLinearOperator(
+                lx.DiagonalLinearOperator(jnp.ones(len(test_inputs_A))),
+                lx.DiagonalLinearOperator(self.Tau))
             L_21 = self.solve_with_L11(kLZ).transpose()
-            S = LkLZ - L_21 @ L_21.transpose() + lx.DiagonalLinearOperator(self.Tau)
+            S = LkLZ + variance - L_21 @ L_21.transpose()
             S = add_jitter(S, jitter).as_matrix()
             L_22 = cholesky(S, lower=True)
             L_22 = lx.MatrixLinearOperator(L_22, lx.lower_triangular_tag)
