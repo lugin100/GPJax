@@ -56,47 +56,22 @@ class Matern32(StationaryKernel):
         return build_student_t_distribution(nu=3)
 
 
-@jax.custom_jvp
 def matern32_kernel(x, y, lengthscale, variance):
     x = x / lengthscale
     y = y / lengthscale
-    tau = euclidean_distance(x, y)
-    K = (
+    s = jnp.sum((x - y) ** 2)
+    
+    # Standard matern kernel definition
+    tau_safe = jnp.sqrt(s + 1e-36)
+    k_large = (
         variance
-        * (1.0 + jnp.sqrt(3.0) * tau)
-        * jnp.exp(-jnp.sqrt(3.0) * tau)
+        * (1.0 + jnp.sqrt(3.0) * tau_safe)
+        * jnp.exp(-jnp.sqrt(3.0) * tau_safe)
     )
-    return K.squeeze()
+    # Taylor around tau=0
+    k_small = variance * (1.0 - (3.0/2.0)*s)
 
+    # Use Taylor approximation when s is small
+    # This guarantees autodifferentiability up to order 2
+    return jnp.where(s < 1e-12, k_small, k_large).squeeze()
 
-@matern32_kernel.defjvp
-def matern32_kernel_jvp(primals, tangents):
-    x, y, lengthscale, variance = primals
-    x_dot, y_dot, l_dot, v_dot = tangents
-
-    x = x / lengthscale
-    y = y / lengthscale
-    # Clip with eps to avoid tau = 0, which would make 2nd derivative unstable
-    eps = 1e-12
-    tau = jnp.maximum(euclidean_distance(x, y), eps)
-
-    exp_term = jnp.exp(-jnp.sqrt(3.0) * tau)
-
-    primal_out = variance * (1.0 + jnp.sqrt(3.0) * tau) * exp_term
-
-    dk_dx = -3.0 * variance * exp_term * (x - y) / lengthscale
-    dk_dy = -dk_dx
-    dk_dv = (1.0 + jnp.sqrt(3.0) * tau) * exp_term
-    dk_dl = 3.0 * variance * exp_term * (x - y)**2 / lengthscale
-    # For n_dim>1, lengthscale can still be scalar (isotropic)
-    # In this case, sum up derivatives along dimension
-    if lengthscale.ndim == 0:
-        dk_dl = jnp.sum(dk_dl)
-
-    tangent_out = (
-        jnp.dot(dk_dx, x_dot)
-        + jnp.dot(dk_dy, y_dot)
-        + jnp.dot(dk_dl, l_dot)
-        + dk_dv * v_dot     # variance is always scalar
-    )
-    return primal_out, tangent_out
