@@ -394,6 +394,7 @@ class ConditionedSeparablePosterior():
         jitter=1e-6,
         *,
         return_covariance_type: Literal["dense", "diagonal"] = "dense",
+        use_cached_functionals: bool = False,
     ) -> GaussianDistribution:
         r"""Return a function that maps test inputs from X to the posterior distribution at given inputs (p_test, X_test),
             taking all previous conditionings into account.
@@ -411,6 +412,7 @@ class ConditionedSeparablePosterior():
             X_test,
             jitter=jitter,
             return_covariance_type=return_covariance_type,
+            use_cached_functionals=use_cached_functionals,
         )
 
 def debug_print(mat, name):
